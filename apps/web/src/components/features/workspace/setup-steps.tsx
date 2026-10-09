@@ -101,6 +101,15 @@ function ErrorLine({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The two commands that build SoloW's executor image — said where Claude would work and again
+ * when the test finds the image unusable, so the two cannot drift apart.
+ */
+const BUILD_IMAGE = {
+  npx: "npx @satcomx00-x00/solow executor-image",
+  make: "make executor-image",
+} as const;
+
 const BILLING_OPTIONS = [
   {
     value: "subscription",
@@ -179,9 +188,9 @@ function WhereItRuns({ setup }: { setup: WorkspaceSetupDto }) {
           <p className="text-muted-foreground text-xs leading-relaxed">
             Docker is installed here, so Claude can work in an isolated container instead. Build its
             image once, in a terminal on this machine, with{" "}
-            <code className="font-mono">npx @satcomx00-x00/solow executor-image</code> (or{" "}
-            <code className="font-mono">make executor-image</code> in a SoloW checkout), then
-            connect{setup.executorKind === null ? "" : " again"}.
+            <code className="font-mono">{BUILD_IMAGE.npx}</code> (or{" "}
+            <code className="font-mono">{BUILD_IMAGE.make}</code> in a SoloW checkout), then connect
+            {setup.executorKind === null ? "" : " again"}.
           </p>
         ) : (
           <p className="text-muted-foreground text-xs leading-relaxed">
@@ -400,15 +409,26 @@ export function RepositoryStep({
   );
 }
 
-/** What went wrong, in words, and what to do about it (F18, edge cases). */
-const PROBLEM: Record<SetupTestProblem, (harness: string, credential: string) => string> = {
+/**
+ * What went wrong, in words, and what to do about it (F18, edge cases). `inContainer` because the
+ * test runs where the setup's Tasks run: a harness missing from the image is fixed by rebuilding
+ * the image, and telling someone to install it on their machine would send them the wrong way.
+ */
+const PROBLEM: Record<
+  SetupTestProblem,
+  (harness: string, credential: string, inContainer: boolean) => string
+> = {
   "not-connected": () => "There is nothing to test yet. Connect Claude first.",
   unreachable: () =>
     "SoloW's agent runner did not answer, so nothing was tested. Make sure SoloW is fully started, then run the test again.",
-  "not-installed": (harness) =>
-    harness === "Claude Code"
-      ? "Claude Code isn't installed on the machine running SoloW. Install it (npm install -g @anthropic-ai/claude-code), then run the test again."
-      : `${harness} isn't installed on the machine running SoloW. Install it, then run the test again.`,
+  "not-installed": (harness, _credential, inContainer) =>
+    inContainer
+      ? `${harness} isn't in the container image Claude runs in. If it is SoloW's image, rebuild it with ${BUILD_IMAGE.npx} (or ${BUILD_IMAGE.make} in a SoloW checkout), then run the test again.`
+      : harness === "Claude Code"
+        ? "Claude Code isn't installed on the machine running SoloW. Install it (npm install -g @anthropic-ai/claude-code), then run the test again."
+        : `${harness} isn't installed on the machine running SoloW. Install it, then run the test again.`,
+  executor: () =>
+    `SoloW couldn't start the isolated container Claude runs in. Check that Docker is running and that the image is built — ${BUILD_IMAGE.npx}, or ${BUILD_IMAGE.make} in a SoloW checkout — then run the test again.`,
   credential: (_harness, credential) =>
     `Claude didn't accept your ${credential}. Go back to Connect Claude and paste a fresh one.`,
   quota: () =>
@@ -471,7 +491,11 @@ export function TestStep({
           <p className="flex items-start gap-2 text-sm">
             <CircleX aria-hidden className="mt-0.5 size-4 shrink-0 text-state-failed" />
             {result.problem
-              ? PROBLEM[result.problem](result.harness ?? "Claude Code", credential)
+              ? PROBLEM[result.problem](
+                  result.harness ?? "Claude Code",
+                  credential,
+                  setup.executorKind === "docker",
+                )
               : "The test did not pass. Run it again."}
           </p>
           {result.fixStep && (

@@ -49,6 +49,18 @@ import type { Executor } from "./types.js";
 export const REAP_GRACE_MS = 20_000;
 
 /**
+ * How long a one-shot container (`ContainerRole`) may live however it is claimed.
+ *
+ * A one-shot is an HTTP request's — an Explain or the setup's test — and the request removes it
+ * in its own `finally`. What this bounds is the case that `finally` cannot cover in a process that
+ * stays up: a `docker rm -f` that failed because the daemon blipped at that moment. The claim
+ * would protect such a container for the life of the process, so age has to be the second rule.
+ * An hour is an order of magnitude past anything a request does once its container exists — the
+ * prepare script, the userland probe and a two-minute turn — so no live request is ever its victim.
+ */
+export const ONE_SHOT_MAX_AGE_MS = 60 * 60_000;
+
+/**
  * The Task states a run can still be sitting inside.
  *
  * `running` is the obvious one, and `parked` is a run inside a five-hour `step.sleepUntil`
@@ -132,7 +144,7 @@ export async function reapOrphanedContainers(
   if (listed.exitCode !== 0) return 0;
 
   const at = now().getTime();
-  let removed = 0;
+  let removed = await reapAbandonedOneShots(host, env.SOLOW_DOCKER_BIN, deployment, at);
 
   for (const container of parseContainers(listed.stdout)) {
     // 1. Grace. A container younger than this may belong to a run that has not registered yet,
@@ -215,6 +227,57 @@ export async function reapOrphanedContainers(
     if (result.exitCode === 0) removed += 1;
   }
 
+  return removed;
+}
+
+/**
+ * The one-shot containers (`ContainerRole`) nothing is coming back for.
+ *
+ * A one-shot has no Task row, registry entry or Session to be evidence of life — it belongs to an
+ * HTTP request, and a request has no record anywhere but the process serving it. So the claim
+ * (`ORCHESTRATOR_EPOCH`, written by `ensureContainer` on creation) is the whole of the evidence:
+ * a container this process claimed is a request still in flight, and one it did not was left by
+ * a predecessor that died mid-request, which nobody will ever dispose of. The grace covers the
+ * moments between `docker run` and the claim; `ONE_SHOT_MAX_AGE_MS` covers a removal this process
+ * itself failed to make.
+ *
+ * Its own enumeration, and the session pass's is filtered to `solow.role=session`: the rules
+ * there read the Task table, and a one-shot labelled with the Task it explains would otherwise be
+ * judged as that Task's container — removed as "a previous run's" while the Explain was answering.
+ */
+async function reapAbandonedOneShots(
+  host: Executor,
+  bin: string,
+  deployment: string,
+  at: number,
+): Promise<number> {
+  const listed = await host.exec([
+    bin,
+    "ps",
+    "-a",
+    "--filter",
+    "label=solow.managed=true",
+    "--filter",
+    "label=solow.role=oneshot",
+    "--filter",
+    `label=solow.deployment=${deployment}`,
+    "--format",
+    "{{.Names}}\t{{.CreatedAt}}",
+  ]);
+  if (listed.exitCode !== 0) return 0;
+  let removed = 0;
+  for (const line of listed.stdout.split("\n")) {
+    const [name, created] = line.split("\t");
+    if (!name?.trim()) continue;
+    const createdAt = parseDockerTime(created ?? "");
+    if (createdAt === null || at - createdAt < REAP_GRACE_MS) continue;
+    const abandoned =
+      at - createdAt > ONE_SHOT_MAX_AGE_MS ||
+      !(await claimedByThisOrchestrator(host, bin, name.trim()));
+    if (!abandoned) continue;
+    const result = await host.exec([bin, "rm", "-f", name.trim()]);
+    if (result.exitCode === 0) removed += 1;
+  }
   return removed;
 }
 

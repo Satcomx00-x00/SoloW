@@ -473,7 +473,7 @@ describe("getWorkspaceSetup", () => {
 });
 
 describe("runSetupTest", () => {
-  it("prompts the agent a new Task would use, asking for a real turn", async () => {
+  it("prompts the agent a new Task would use, where it would run, asking for a real turn", async () => {
     const id = await bareWorkspace();
     const made = await connect(id, "subscription", "token");
     const asked: unknown[] = [];
@@ -483,7 +483,16 @@ describe("runSetupTest", () => {
       return PASSED;
     });
 
-    expect(asked).toEqual([{ workspaceId: id, agentProfileId: made.harnessProfileId, turn: true }]);
+    // The executor a new Task would get, so a container setup is tested in its container
+    // rather than by whatever is installed on the orchestrator's host (roadmap B4).
+    expect(asked).toEqual([
+      {
+        workspaceId: id,
+        agentProfileId: made.harnessProfileId,
+        turn: true,
+        executorProfileId: made.executorProfileId,
+      },
+    ]);
     expect(result).toEqual({
       ok: true,
       problem: null,
@@ -534,6 +543,11 @@ describe("runSetupTest", () => {
     });
     expect(await runSetupTest(ctx, async () => failedWith("quota"))).toMatchObject({
       problem: "quota",
+      fixStep: null,
+    });
+    // The container could not be started: Docker or its image, neither fixed by a step here.
+    expect(await runSetupTest(ctx, async () => failedWith("executor"))).toMatchObject({
+      problem: "executor",
       fixStep: null,
     });
     const unclassified = await runSetupTest(ctx, async () => failedWith(undefined));

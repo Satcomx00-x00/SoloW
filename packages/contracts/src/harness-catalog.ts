@@ -249,15 +249,34 @@ export const harnessProbeRequest = z.object({
    * opt-in because it is the one probe that spends tokens.
    */
   turn: z.boolean().optional(),
+  /**
+   * Run the probe where this Executor Profile's Tasks run, rather than on the orchestrator's host
+   * (roadmap B4) — the guided setup's test names the executor a new Task would get, so a setup
+   * that put Claude in a container proves the container: its image, its utilities and the harness
+   * binary inside it. A container probe is a throwaway one, removed when the request ends.
+   *
+   * Optional because Settings' "Test" asks about a Harness Profile on its own, with no executor in
+   * view, and keeps the host probe it always had. Resolved within the ticket's Workspace, so an id
+   * from another tenant reads as absent (Principle V).
+   */
+  executorProfileId: z.string().min(1).optional(),
 });
 export type HarnessProbeRequest = z.infer<typeof harnessProbeRequest>;
 
 /**
  * What kind of failure a probe met, for a caller that has to say what to do next rather than
  * quote `reason`: the binary is not there, the provider refused the credential, the plan's quota
- * is spent, or anything else the harness did.
+ * is spent, the executor a probe was asked to run in could not be provided (no daemon, no image,
+ * an image without the utilities the driver needs — the run's own preflight verdict), or anything
+ * else the harness did.
  */
-export const harnessProbeFailureSchema = z.enum(["missing", "credential", "quota", "harness"]);
+export const harnessProbeFailureSchema = z.enum([
+  "missing",
+  "credential",
+  "quota",
+  "executor",
+  "harness",
+]);
 export type HarnessProbeFailure = z.infer<typeof harnessProbeFailureSchema>;
 
 /**

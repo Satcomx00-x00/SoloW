@@ -52,6 +52,20 @@ export interface DockerIds {
 }
 
 /**
+ * What a container is for, and so which rules find it, adopt it and reap it (`solow.role`).
+ *
+ * `session` is a Task's own container: named for the Task, adopted across Inngest replays, reaped
+ * by reading the Task table. `oneshot` is a launch that is **not** a Task's run — the Brief tab's
+ * Explain, the guided setup's test — and it must be neither of those things to a Task. Sharing the
+ * Task's name would adopt the Task's live container, and `dispose()` would then remove it; sharing
+ * its labels without its name would let the Task's own `ensureContainer` find the throwaway and
+ * `rm -f` it as a stranger. So a one-shot is named for its *request* (the `sessionId` of its
+ * `DockerIds` is a request id, never a Session's), every lookup is scoped by role, and the reaper
+ * judges it by a rule of its own — see `reapAbandonedOneShots` in `reap.ts`.
+ */
+export type ContainerRole = "session" | "oneshot";
+
+/**
  * What the preflight learned about the commands a Task is going to spawn.
  *
  * A `Map` rather than a set of names that exist, because `spawn` has to tell three states apart
@@ -122,6 +136,8 @@ export interface DockerExecutorOpts {
   user?: string;
   /** Shared with the preflight, which fills it. See `CommandProbes`. */
   probedCommands?: CommandProbes;
+  /** `session` unless stated: a Task's own container. See `ContainerRole`. */
+  role?: ContainerRole;
 }
 
 /**
@@ -182,6 +198,23 @@ export function containerName(
   deployment: string,
 ): string {
   return `solow-${sha256(`${deployment}:${ids.workspaceId}:${ids.taskId}`).slice(0, 12)}`;
+}
+
+/**
+ * The name of the container these ids and options describe — a Task's, or a one-shot request's.
+ *
+ * A one-shot is named for its request id alone (within the deployment, like a Task's), so no
+ * Task's name can ever come out of it: the two hashes are over different inputs, and the prefix
+ * keeps someone reading `docker ps` from mistaking one for the other.
+ */
+export function containerNameFor(
+  ids: DockerIds,
+  opts: Pick<DockerExecutorOpts, "worktreeRoot" | "role">,
+): string {
+  const deployment = deploymentId(opts.worktreeRoot);
+  return opts.role === "oneshot"
+    ? `solow-oneshot-${sha256(`${deployment}:oneshot:${ids.sessionId}`).slice(0, 12)}`
+    : containerName(ids, deployment);
 }
 
 /**
@@ -898,14 +931,17 @@ function labelsFor(
   ids: DockerIds,
   deployment: string,
   fingerprint: string,
+  role: ContainerRole,
 ): Record<string, string> {
   return {
     "solow.managed": "true",
-    "solow.role": "session",
+    "solow.role": role,
     "solow.schema": "1",
     "solow.deployment": deployment,
     "solow.workspace": ids.workspaceId,
-    "solow.task": ids.taskId,
+    // Omitted rather than empty for a one-shot about no Task (the setup's test): an empty label
+    // value is a filter nobody can write reliably, and a one-shot is never looked up by Task.
+    ...(ids.taskId ? { "solow.task": ids.taskId } : {}),
     "solow.run": ids.sessionId,
     "solow.cfg": fingerprint,
   };
@@ -1081,14 +1117,30 @@ export async function ensureContainer(
 ): Promise<{ name: string; created: boolean }> {
   const bin = opts.dockerBin ?? "docker";
   const deployment = deploymentId(opts.worktreeRoot);
-  const name = containerName(ids, deployment);
+  const role = opts.role ?? "session";
+  const name = containerNameFor(ids, opts);
   const user = opts.user ?? defaultContainerUser();
   const binds = await bindsFor(host, config, opts);
   const fingerprint = configFingerprint(config, binds, user);
-  const labels = labelsFor(ids, deployment, fingerprint);
+  const labels = labelsFor(ids, deployment, fingerprint, role);
 
   const docker = (args: string[]) => host.exec([bin, ...args]);
 
+  /*
+   * Scoped by role, because everything found here that is not adoptable is removed. Without it a
+   * Task's run would find the throwaway an Explain started about that same Task and `rm -f` it
+   * mid-answer; and a one-shot is scoped to its own request id for the mirror-image reason — the
+   * Task's live container is the one thing it must never touch (see `ContainerRole`).
+   */
+  const scope =
+    role === "oneshot"
+      ? ["--filter", `label=solow.run=${ids.sessionId}`]
+      : [
+          "--filter",
+          `label=solow.workspace=${ids.workspaceId}`,
+          "--filter",
+          `label=solow.task=${ids.taskId}`,
+        ];
   const found = await docker([
     "ps",
     "-aq",
@@ -1097,9 +1149,8 @@ export async function ensureContainer(
     "--filter",
     `label=solow.deployment=${labels["solow.deployment"]}`,
     "--filter",
-    `label=solow.workspace=${ids.workspaceId}`,
-    "--filter",
-    `label=solow.task=${ids.taskId}`,
+    `label=solow.role=${role}`,
+    ...scope,
   ]);
   for (const id of found.stdout
     .split("\n")
@@ -1268,7 +1319,7 @@ export function createDockerExecutor(
   opts: DockerExecutorOpts,
 ): Executor {
   const bin = opts.dockerBin ?? "docker";
-  const name = containerName(ids, deploymentId(opts.worktreeRoot));
+  const name = containerNameFor(ids, opts);
   const user = opts.user ?? defaultContainerUser();
   const asUser = ["--user", user];
   const jailRoot = resolve(opts.jailRoot);

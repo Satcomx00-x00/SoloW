@@ -87,8 +87,10 @@ environment already passes through.**
 7. **The two out-of-band routes get the same treatment.** `handleExplainPost` and
    `handleProbePost` (`apps/orchestrator/src/index.ts`) launch the very same harness with the very
    same credential; a probe that passed only because the operator's own `~/.claude` happened to be
-   logged in would be answering for a Task that will not be. They get a home inside the scratch
-   directory they already make and already remove.
+   logged in would be answering for a Task that will not be. On a host executor they get a home
+   inside the scratch directory they already make and already remove; on a Docker one they run in a
+   one-shot container of the Task's image (roadmap B4) and, like a run, are told to stay in the
+   container's own `HOME` (point 5).
 
 **Creating the directory is a courtesy; the environment is the guarantee.** A `mkdir` that fails
 does not fail the run: the harness creates its own config directory on any machine it has not run

@@ -731,6 +731,27 @@ export async function loadHarnessProbeContext(
 }
 
 /**
+ * One Executor Profile, Workspace-scoped — the executor a probe was asked to run in (the guided
+ * setup's test, roadmap B4). An id from another tenant reads as absent, never as someone else's
+ * execution host (Principle V): a probe that could be pointed at a stranger's profile would run
+ * this Workspace's credential under that profile's image, mounts and environment.
+ */
+export async function loadExecutorProfile(
+  db: Db,
+  workspaceId: string,
+  executorProfileId: string,
+): Promise<typeof executorProfile.$inferSelect | null> {
+  const [ep] = await db
+    .select()
+    .from(executorProfile)
+    .where(
+      and(eq(executorProfile.workspaceId, workspaceId), eq(executorProfile.id, executorProfileId)),
+    )
+    .limit(1);
+  return ep ?? null;
+}
+
+/**
  * The Harness Profile behind every Step of a Workflow, resolved once per run (issue #5, AC-3).
  *
  * Read in one durable step ahead of the loop rather than per Step, because the pre-clone gates

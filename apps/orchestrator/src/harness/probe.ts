@@ -77,10 +77,15 @@ const EMPTY: Omit<HarnessProbeResult, "ok" | "reason" | "failure"> = {
 /** How long the whole probe may take before it is called a failure. */
 export const PROBE_TIMEOUT_MS = 20_000;
 
+/** How the container driver's `spawn` says a harness binary is not in its image (`docker.ts`). */
+const FOUND_IN_EXECUTOR = /in the executor image/;
+
 function reasonFor(cause: unknown, command: string): string {
   const message = cause instanceof Error ? cause.message : String(cause);
   // The overwhelmingly common one, and the one worth naming precisely: the harness is not there.
-  if (isMissing(message)) {
+  // Not rewritten when the executor already said where it looked: "on PATH for the orchestrator"
+  // is the wrong place to send someone whose harness was missing from a container's image.
+  if (isMissing(message) && !FOUND_IN_EXECUTOR.test(message)) {
     return `"${command}" could not be started — is it installed and on PATH for the orchestrator?`;
   }
   return message;

@@ -110,6 +110,8 @@ export interface OrchestratorClient {
     agentProfileId: string;
     /** Follow a passing probe with one real prompt — see `harnessProbeRequest.turn`. */
     turn?: boolean;
+    /** Probe where this Executor Profile's Tasks run — see `harnessProbeRequest.executorProfileId`. */
+    executorProfileId?: string;
   }): Promise<HarnessProbeReport>;
   /**
    * Whether the orchestrator answers, and whether the engine behind it does (FINDINGS F3).
@@ -333,6 +335,7 @@ export const orchestrator: OrchestratorClient = {
         ticket,
         agentProfileId: input.agentProfileId,
         ...(input.turn ? { turn: true } : {}),
+        ...(input.executorProfileId ? { executorProfileId: input.executorProfileId } : {}),
       }),
     });
     if (!res.ok) {
