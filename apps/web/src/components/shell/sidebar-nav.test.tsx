@@ -424,6 +424,17 @@ describe("Breadcrumb", () => {
     await waitFor(() => expect(crumbs()).toEqual(["Settings", "Secrets"]));
   });
 
+  it("places the guided setup under the Settings section that opens it", async () => {
+    pathname = "/setup";
+    renderWithTrpc(<HeaderBar />, handlers());
+
+    await waitFor(() => expect(crumbs()).toEqual(["Settings", "Workspace", "Guided setup"]));
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getByRole("link", { name: "Workspace" }).getAttribute("href")).toBe(
+      "/settings?section=workspace",
+    );
+  });
+
   it("places an Issue under its Project's Issues, ending on the Issue's title", async () => {
     pathname = "/issues/i-7";
     renderWithTrpc(

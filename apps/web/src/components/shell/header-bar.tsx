@@ -4,7 +4,12 @@ import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
-import { projectSectionHref, settingsSectionFor } from "@/lib/navigation";
+import {
+  projectSectionHref,
+  settingsHref,
+  settingsPageFor,
+  settingsSectionFor,
+} from "@/lib/navigation";
 import { trpc } from "@/trpc/react";
 import { CommandPaletteTrigger } from "./command-palette";
 import { HeaderActionsOutlet } from "./header-actions";
@@ -79,6 +84,8 @@ function Trail() {
     { enabled: place.projectId !== null },
   );
 
+  const settingsPage = settingsPageFor(place.pathname);
+
   const segments: Segment[] = [];
   if (place.projectId) {
     segments.push({ label: "Projects", href: "/projects" });
@@ -94,6 +101,13 @@ function Trail() {
     }
   } else if (place.section) {
     segments.push({ label: place.section.label, href: place.section.href });
+  } else if (settingsPage) {
+    segments.push({ label: "Settings", href: "/settings" });
+    segments.push({
+      label: settingsSectionFor(settingsPage.section).label,
+      href: settingsHref(settingsPage.section),
+    });
+    segments.push({ label: settingsPage.label });
   }
   if (leaf) segments.push(leaf);
 

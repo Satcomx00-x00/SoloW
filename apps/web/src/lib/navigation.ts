@@ -378,3 +378,27 @@ export function settingsSectionsIn(group: SettingsGroup): SettingsSection[] {
 export function settingsHref(id: string): string {
   return `/settings?section=${id}`;
 }
+
+/** A page opened from a Settings section without being one — see `settingsPageFor`. */
+export interface SettingsPage {
+  href: string;
+  label: string;
+  /** The id of the section that links to it, which is where the trail places it. */
+  section: string;
+}
+
+const SETTINGS_PAGES: readonly SettingsPage[] = [
+  // Spec F18 FR-6: the guided setup stays reachable after first use, from the Workspace section.
+  { href: "/setup", label: "Guided setup", section: "workspace" },
+];
+
+/**
+ * The Settings page a path is, if it is one.
+ *
+ * Not a workspace destination — the sidebar and the palette would list it as one, and it is a
+ * step inside Settings rather than a place of its own — so `sectionFor` answers nothing for it,
+ * and without this the breadcrumb on `/setup` was empty.
+ */
+export function settingsPageFor(pathname: string): SettingsPage | null {
+  return SETTINGS_PAGES.find((p) => pathname === p.href) ?? null;
+}

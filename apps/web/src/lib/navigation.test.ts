@@ -8,8 +8,10 @@ import {
   projectSectionFor,
   projectSectionHref,
   SECTIONS,
+  SETTINGS_SECTIONS,
   sectionFor,
   settingsHref,
+  settingsPageFor,
   settingsSectionFor,
   settingsSectionsIn,
   taskIdFromPath,
@@ -129,5 +131,19 @@ describe("settings sections", () => {
 
   it("addresses a section by query, not by fragment", () => {
     expect(settingsHref("secrets")).toBe("/settings?section=secrets");
+  });
+});
+
+describe("settingsPageFor", () => {
+  it("places the guided setup under an existing Settings section", () => {
+    const page = settingsPageFor("/setup");
+    expect(page?.label).toBe("Guided setup");
+    // A real id, not one `settingsSectionFor` would quietly fall back from.
+    expect(SETTINGS_SECTIONS.map((s) => s.id)).toContain(page?.section ?? "");
+  });
+
+  it("answers nothing for a workspace destination or a path it does not know", () => {
+    expect(settingsPageFor("/settings")).toBeNull();
+    expect(settingsPageFor("/setup/extra")).toBeNull();
   });
 });
