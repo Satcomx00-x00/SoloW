@@ -7,7 +7,9 @@ comparable tools in the category.
 
 This documentation is **business-level and implementation-agnostic** — it describes
 *what* the product does and *why*, not *how* it is coded. It contains no source code
-and no code snippets.
+and no code snippets. The one exception is [`contributing/`](./contributing/), written for
+people changing the code: it names files and functions so they can be found, but still contains
+no code snippets.
 
 ## How this documentation is organised
 
@@ -21,6 +23,7 @@ of information has one predictable home:
 | [`architecture/`](./architecture/) | [arc42](https://arc42.org) + [C4](https://c4model.com) | How the system is structured, at business-readable altitude |
 | [`decisions/`](./decisions/) | [MADR / Nygard ADRs](https://adr.github.io) | The significant choices and their trade-offs |
 | [`operations/`](./operations/) | How-to guides | Running a local install day to day: [backup and restore](./operations/backup-and-restore.md), [running as a service](./operations/running-as-a-service.md) |
+| [`contributing/`](./contributing/) | Walkthroughs for contributors | Where the code behind a journey lives, and what a change must not break: [the run engine and the review gate](./contributing/run-engine-walkthrough.md) |
 | [`glossary.md`](./glossary.md) | Ubiquitous Language | The shared vocabulary used everywhere |
 | [`CONVENTIONS.md`](./CONVENTIONS.md) | Docs-as-Code | How this documentation is written and maintained |
 
@@ -35,6 +38,8 @@ of information has one predictable home:
   current build actually implements.
 - **Understanding the system shape?** Read the [Architecture overview](./architecture/README.md).
 - **Understanding a specific choice?** Browse the [Decision Log](./decisions/README.md).
+- **About to change the code?** Follow one Task through the
+  [run engine and the review gate](./contributing/run-engine-walkthrough.md).
 
 ## Documentation principles
 
