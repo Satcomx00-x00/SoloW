@@ -18,6 +18,7 @@ import { HostRunWarning } from "@/components/features/host-run-warning";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { describeError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 
@@ -30,15 +31,15 @@ import { trpc } from "@/trpc/react";
  * on their first minute four concepts they do not need yet.
  */
 
-/** A refusal from the server, as a sentence. Never the code itself (E6). */
-function sentenceFor(code: string | undefined, fallback: string): string {
-  if (code === CommonErrorCode.RateLimited)
-    return "Too many tries in a row. Wait a minute, then try again.";
-  if (code === CommonErrorCode.FlagDisabled) {
-    return "Running agents is switched off for this workspace. Turn it back on above, then try again.";
-  }
-  return fallback;
-}
+/**
+ * The shared table (E6), with the one code this screen can say more usefully: the switch it
+ * names is on this page. Everything else — a path that is not a repository, a rate limit, a
+ * server fault — reads as it does everywhere, rather than as a guess about the token.
+ */
+const SETUP_ERRORS = {
+  [CommonErrorCode.FlagDisabled]:
+    "Running agents is switched off for this workspace. Turn it back on above, then try again.",
+};
 
 /**
  * Real radios inside their labels, as Appearance does it: one tab stop, arrow keys between the
@@ -230,14 +231,7 @@ export function ConnectClaudeStep({
 
       <WhereItRuns setup={setup} />
 
-      {connect.error && (
-        <ErrorLine>
-          {sentenceFor(
-            connect.error.message,
-            `Claude could not be connected. Check the ${isToken ? "token" : "key"} you pasted and try again.`,
-          )}
-        </ErrorLine>
-      )}
+      {connect.error && <ErrorLine>{describeError(connect.error, SETUP_ERRORS)}</ErrorLine>}
 
       <Button disabled={!credential.trim()} loading={connect.isPending} type="submit">
         Connect Claude
@@ -348,11 +342,7 @@ export function RepositoryStep({
         )}
       </div>
 
-      {connect.error && (
-        <ErrorLine>
-          {sentenceFor(connect.error.message, "That repository could not be added. Try again.")}
-        </ErrorLine>
-      )}
+      {connect.error && <ErrorLine>{describeError(connect.error, SETUP_ERRORS)}</ErrorLine>}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Button disabled={!location.trim()} loading={connect.isPending} type="submit">
@@ -463,11 +453,7 @@ export function TestStep({
         )
       )}
 
-      {test.error && (
-        <ErrorLine>
-          {sentenceFor(test.error.message, "The test could not be started. Try again.")}
-        </ErrorLine>
-      )}
+      {test.error && <ErrorLine>{describeError(test.error, SETUP_ERRORS)}</ErrorLine>}
 
       <Button
         loading={test.isPending}
