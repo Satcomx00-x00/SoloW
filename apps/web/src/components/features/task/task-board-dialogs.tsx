@@ -525,7 +525,7 @@ export function StepBody({
             <dd>{GATE_WORD[step.gate]}</dd>
           </>
         ) : null}
-        <dt className="text-muted-foreground">On the board</dt>
+        <dt className="text-muted-foreground">On this step</dt>
         <dd>{parts.length === 0 ? "Nothing yet" : parts.join(" · ")}</dd>
       </dl>
       {step?.promptTemplate ? (
@@ -541,7 +541,7 @@ export function StepBody({
       <div className="flex flex-wrap gap-2">
         {step ? (
           <Button variant="outline" size="sm" onClick={onShowOnBoard}>
-            <Focus aria-hidden /> Show this step on the board
+            <Focus aria-hidden /> Show in Steps
           </Button>
         ) : null}
         {step && onForceReview ? (
