@@ -107,9 +107,11 @@ jobs:
             echo "release=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Nothing since ${last:-the beginning} asks for a release — no feat, fix, perf or breaking change."
           else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "version=${next}" >> "$GITHUB_OUTPUT"
-            echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+            {
+              echo "release=true"
+              echo "version=${next}"
+              echo "tag=v${next}"
+            } >> "$GITHUB_OUTPUT"
             echo "::notice::${last:-The beginning} → v${next}."
           fi
 
