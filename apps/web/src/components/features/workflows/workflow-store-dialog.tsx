@@ -210,8 +210,11 @@ function StoreCard({
   const gates = entry.steps.filter((s) => s.gate === "human").length;
 
   const install = trpc.workflow.installFromStore.useMutation({
-    onSuccess: (result) => {
-      utils.workflow.list.invalidate();
+    onSuccess: async (result) => {
+      // Cancelled first, so a list read still in flight cannot answer for the new pipeline
+      // (see `NewWorkflowButton`).
+      await utils.workflow.list.cancel();
+      void utils.workflow.list.invalidate();
       // The Steps name Skills the install may just have written; the library and every
       // Step's picker read that list.
       if (result.createdSkills.length > 0) utils.library.skill.list.invalidate();

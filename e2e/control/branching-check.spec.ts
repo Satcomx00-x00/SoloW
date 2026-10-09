@@ -9,9 +9,11 @@ import {
   deleteWorkflow,
   expectTaskDeleted,
   gateButton,
+  NO_SUCH_ID,
   openTask,
   openTaskReadyToDelete,
   stepHeader,
+  warmRoutes,
 } from "../support/flows.js";
 
 /**
@@ -144,6 +146,9 @@ test.describe("branching control check — conditions, a loop, and a gate in the
     });
 
     await test.step("draw five Steps on the canvas", async () => {
+      // Create's client navigation would otherwise wait out the first `next dev` compile of the
+      // Workflow's page inside `toHaveURL` (the main-line check does the same, and says more).
+      await warmRoutes(page, [`/workflows/${NO_SUCH_ID}`]);
       await page.goto("/workflows");
       const toggle = page.getByRole("button", { name: "New workflow" });
       const nameField = page.getByRole("textbox", { name: "Workflow name" });
