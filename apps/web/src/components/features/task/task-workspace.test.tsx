@@ -2052,6 +2052,34 @@ describe("TaskWorkspace workflow steps", () => {
     await waitFor(() => expect(stepStatuses()).toEqual(["done", "running", "upcoming"]));
   });
 
+  it("catches a Step that advanced before its stream was listening", async () => {
+    // The stream replays the transcript, never state: a `status` frame published between the
+    // page's first read and the socket subscribing reached nobody, and the strip stayed put.
+    let reads = 0;
+    let firstRead: () => void = () => {};
+    const readOnce = new Promise<void>((resolve) => {
+      firstRead = resolve;
+    });
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task({ state: "running", workflowId: "wf-1", workflowStepId: "st-2" }),
+      "workflow.taskBinding": () => {
+        reads += 1;
+        firstRead();
+        // Step 1 when first read; by the time anything asks again, the run has moved on.
+        return binding(reads === 1 ? "st-1" : "st-2");
+      },
+      // The socket subscribes only after that first read — the order that loses the frame.
+      "stream.ticket": async () => {
+        await readOnce;
+        return { url: "ws://hub.test/?ticket=t", expiresAt: "2026-01-01T00:01:00.000Z" };
+      },
+    });
+
+    const strip = await screen.findByRole("region", { name: "Workflow progress" });
+    await waitFor(() => expect(strip.textContent).toContain("Step 2 of 3"));
+  });
+
   it("marks the last Step done once the Task is, rather than leaving it current forever", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       ...base,

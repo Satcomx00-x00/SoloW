@@ -798,35 +798,50 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * once, which is harmless.
    */
   const seenLinks = useRef<Set<string>>(new Set());
+  const refreshTask = useCallback(() => {
+    utils.task.get.invalidate({ id: taskId });
+    utils.session.listForTask.invalidate({ taskId });
+    utils.session.get.invalidate();
+    // A Step advancing announces the state too, so this is what moves the step strip.
+    utils.workflow.taskBinding.invalidate({ taskId });
+    // …and what tells a Step's passes apart on the board, when the Workflow loops.
+    utils.session.stepDecisions.invalidate({ taskId });
+    // Readiness is derived from the blockers' states, so a predecessor finishing is what
+    // un-refuses Launch here — the board re-reads the edges on every status for the same reason.
+    utils.task.dependencies.invalidate();
+    // The Issue above this Task derives its status from the Tasks under it, so a run that
+    // finishes changes what the Issues list and the board card would say. Both are a
+    // navigation away and would otherwise be stale on arrival.
+    utils.issue.list.invalidate();
+    utils.task.list.invalidate();
+  }, [utils, taskId]);
   const onLive = useCallback(
     (event: TaskEvent) => {
       // A merge request opened mid-run produces no `status` and no `diff`, so nothing below
       // would refetch the Session that holds the link. Noticing it here is what puts the button
       // on the page while the run is still going (see `noticesNewRunLink`).
       if (noticesNewRunLink(event, seenLinks.current)) utils.session.get.invalidate();
-      if (event.kind === "status" || event.kind === "diff") {
-        utils.task.get.invalidate({ id: taskId });
-        utils.session.listForTask.invalidate({ taskId });
-        utils.session.get.invalidate();
-        // A Step advancing announces the state too, so this is what moves the step strip.
-        utils.workflow.taskBinding.invalidate({ taskId });
-        // …and what tells a Step's passes apart on the board, when the Workflow loops.
-        utils.session.stepDecisions.invalidate({ taskId });
-        // Readiness is derived from the blockers' states, so a predecessor finishing is what
-        // un-refuses Launch here — the board re-reads the edges on every status for the same reason.
-        utils.task.dependencies.invalidate();
-        // The Issue above this Task derives its status from the Tasks under it, so a run that
-        // finishes changes what the Issues list and the board card would say. Both are a
-        // navigation away and would otherwise be stale on arrival.
-        utils.issue.list.invalidate();
-        utils.task.list.invalidate();
-      }
+      if (event.kind === "status" || event.kind === "diff") refreshTask();
     },
-    [utils, taskId],
+    [utils, refreshTask],
   );
   const [ack, setAck] = useState<TaskInputAck | null>(null);
   const onAck = useCallback((next: TaskInputAck) => setAck(next), []);
   const live = useTaskStream(taskId, { onEvent: onLive, onAck });
+  /*
+   * Read again each time the stream (re)opens, because the stream does not replay state.
+   *
+   * The page's queries answer when they answer and the socket subscribes when it subscribes, and
+   * a `status` frame published in between reached nobody: the reconnect replay carries the
+   * transcript, not state changes (`ws/replay.ts` gives `state` rows no wire form). A Step that
+   * advanced in that gap left the strip on "Step 1 of 2" for good — the shape of the control
+   * check's one failure once its pages became fast enough to open the gap — and a socket that dropped and came
+   * back (a laptop waking) missed whatever changed while it was down. Once open, everything later
+   * arrives live, so one re-read here closes it.
+   */
+  useEffect(() => {
+    if (live.status === "open") refreshTask();
+  }, [live.status, refreshTask]);
   const router = useRouter();
   /**
    * A steer typed while the stream was away (TASK-022).
