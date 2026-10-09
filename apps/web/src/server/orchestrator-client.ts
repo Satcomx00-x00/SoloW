@@ -2,6 +2,8 @@ import "server-only";
 import {
   type DockerAvailabilityReport,
   dockerAvailabilityReport,
+  type ExecutorImageBuildStatus,
+  executorImageBuildStatus,
   type HarnessExplainReport,
   type HarnessProbeReport,
   harnessExplainReport,
@@ -122,6 +124,15 @@ export interface OrchestratorClient {
   health(): Promise<SystemHealthDto>;
   /** Whether the orchestrator's host has a reachable Docker daemon (roadmap B4). */
   dockerAvailability(input: { workspaceId: string }): Promise<DockerAvailabilityReport | null>;
+  /**
+   * Where the orchestrator's build of the executor image is (roadmap B4) — or, with `start`, start
+   * one first, unless one is running already. Null when the orchestrator could not be asked: an
+   * unanswered question is not a build that failed, and the screen says which it was.
+   */
+  executorImageBuild(input: {
+    workspaceId: string;
+    start: boolean;
+  }): Promise<ExecutorImageBuildStatus | null>;
   /** Ask the Task's own harness for one answer — the Brief tab's Explain (see dal/explain-criterion.ts). */
   explainWithHarness(input: {
     workspaceId: string;
@@ -315,6 +326,30 @@ export const orchestrator: OrchestratorClient = {
       });
       if (!res.ok) return null;
       return dockerAvailabilityReport.parse(await res.json());
+    } catch {
+      return null;
+    }
+  },
+  async executorImageBuild(input) {
+    const base = orchestratorUrl();
+    if (!base) return null;
+    try {
+      // Board-scoped, as for availability: the image belongs to the machine, not to a Task.
+      const ticket = signStreamTicket(
+        { workspaceId: input.workspaceId, taskId: null },
+        webEnv().SOLOW_STREAM_SECRET,
+        Date.now(),
+      );
+      const res = await fetch(
+        new URL(input.start ? "/executor-image/build" : "/executor-image", base),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ticket }),
+        },
+      );
+      if (!res.ok) return null;
+      return executorImageBuildStatus.parse(await res.json());
     } catch {
       return null;
     }

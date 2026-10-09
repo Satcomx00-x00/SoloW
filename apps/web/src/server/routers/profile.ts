@@ -9,6 +9,7 @@ import {
   deleteHarnessProfileInput,
   dockerAvailabilityReport,
   duplicateHarnessConfigInput,
+  executorImageBuildStatus,
   executorProfileDto,
   executorProfileListDto,
   exportHarnessConfigInput,
@@ -327,6 +328,21 @@ export const profileRouter = router({
     dockerAvailability: ownerProcedure
       .output(dockerAvailabilityReport.nullable())
       .query(({ ctx }) => orchestrator.dockerAvailability({ workspaceId: ctx.rctx.workspaceId })),
+    /**
+     * Where the build of the executor image is, so the guided setup can build it in one click
+     * (roadmap B4). Null when the orchestrator could not be asked.
+     */
+    imageBuild: ownerProcedure
+      .output(executorImageBuildStatus.nullable())
+      .query(({ ctx }) =>
+        orchestrator.executorImageBuild({ workspaceId: ctx.rctx.workspaceId, start: false }),
+      ),
+    /** Start that build, or join the one already running. Answers at once; the build takes minutes. */
+    buildImage: ownerProcedure
+      .output(executorImageBuildStatus.nullable())
+      .mutation(({ ctx }) =>
+        orchestrator.executorImageBuild({ workspaceId: ctx.rctx.workspaceId, start: true }),
+      ),
     list: ownerProcedure
       .meta({
         openapi: {
