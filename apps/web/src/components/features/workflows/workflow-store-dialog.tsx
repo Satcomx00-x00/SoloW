@@ -251,7 +251,7 @@ function StoreCard({
       </ol>
       <p className="text-2xs text-muted-foreground">
         {entry.steps.length === 1 ? "1 step" : `${entry.steps.length} steps`}
-        {gates > 0 && ` · ${gates === 1 ? "1 human gate" : `${gates} human gates`}`}
+        {gates > 0 && ` · ${gates === 1 ? "1 waits for review" : `${gates} wait for review`}`}
         {skills.length > 0 && (
           <>
             {" · brings "}

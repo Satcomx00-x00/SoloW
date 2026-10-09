@@ -63,12 +63,6 @@ export interface Section {
   href: string;
   label: string;
   icon: LucideIcon;
-  /**
-   * True for a section whose UI is live but not functionally complete — see
-   * docs/features/F03-workflow-designer.md. Renderers read this to show a WIP marker instead of
-   * letting the section pass for finished work.
-   */
-  wip?: boolean;
 }
 
 /**
@@ -85,7 +79,7 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
   { href: "/unassigned", label: "Unassigned", icon: Inbox },
   // Deliberately not "…in this project": a Workflow names Harness Profiles and Steps, never a
   // Project, so nothing about this entry may imply a scope the data does not have.
-  { href: "/workflows", label: "Workflows", icon: Workflow, wip: true },
+  { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/history", label: "History", icon: History },
   // Whether the loop works, read from what it recorded (finding A4). After History because both
   // look back at finished work; Outcomes adds it up.
@@ -104,7 +98,6 @@ export interface ProjectSection {
   path: string;
   label: string;
   icon: LucideIcon;
-  wip?: boolean;
 }
 
 export const PROJECT_SECTIONS: readonly ProjectSection[] = [

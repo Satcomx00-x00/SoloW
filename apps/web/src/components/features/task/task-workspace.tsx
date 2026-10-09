@@ -190,13 +190,14 @@ function CompletionBadge({ outcome }: { outcome: string | null }) {
 
 /**
  * The page's views: the board, and the two pieces of evidence a gate is decided on — the brief
- * and the change. The board is where the run is watched and every question answered, and it
+ * and the change. The interface calls the board "Steps": "Board" is the Project's Kanban, and one
+ * word with two meanings was the confusion (E4). The code keeps its own name for it. The board is where the run is watched and every question answered, and it
  * replaces the Run and Plan tabs it grew out of: the log moved to the terminal beside it and the
  * plan is on the board, under the Step it belongs to. The gate is on the board too, and under
  * the brief and the change as a bar, so it is never a view away.
  */
-type WorkspaceTab = "board" | "brief" | "changes";
-const TABS: readonly WorkspaceTab[] = ["board", "brief", "changes"];
+type WorkspaceTab = "steps" | "brief" | "changes";
+const TABS: readonly WorkspaceTab[] = ["steps", "brief", "changes"];
 /** The terminal pane's id, for the button that opens it. */
 const TERMINAL_PANE_ID = "task-terminal-pane";
 
@@ -401,9 +402,9 @@ function BoardLegend({
   const row =
     "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50";
   return (
-    <nav aria-label="On the board" className="px-2 pt-4 pb-3">
+    <nav aria-label="In Steps" className="px-2 pt-4 pb-3">
       <p className="px-2 pb-1.5 font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
-        On the board
+        In Steps
       </p>
       <ul className="space-y-px">
         <li>
@@ -873,8 +874,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * operator was watching, an intermediate Workflow gate lives on it, and a view that moves by
    * itself loses the reader's place. A manual pick sticks until the Task changes state. The pick is also in the URL
    * (`?tab=`), so a refresh stays put and a link to the Changes view is a link to the Changes
-   * view; it is read once, on arrival, and written on every pick. An old `?tab=run` or `?tab=plan`
-   * is not a view any more, and reads as no pick at all — which lands on the board, where both went.
+   * view; it is read once, on arrival, and written on every pick. An old `?tab=run`, `?tab=plan` or
+   * `?tab=board` is not a view any more, and reads as no pick at all — which lands on the board,
+   * where all three went.
    */
   const [urlTab, setUrlTab] = useUrlTab("tab", TABS);
   const [tabPick, setTabPick] = useState<{ tab: WorkspaceTab; state: TaskState | null } | null>(
@@ -1300,7 +1302,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     landedAtGate.current.atGate = false;
   }
   const autoTab: WorkspaceTab =
-    landedAtGate.current.atGate && t.state === "review" ? "changes" : "board";
+    landedAtGate.current.atGate && t.state === "review" ? "changes" : "steps";
   // A pick from the URL has no state yet: it holds until the first state change after arrival.
   const tab =
     tabPick && (tabPick.state === null || tabPick.state === t.state) ? tabPick.tab : autoTab;
@@ -1445,7 +1447,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   };
   const revealOnBoard = (item: BoardItem | undefined) => {
     if (!item) return;
-    pickTab("board");
+    pickTab("steps");
     requestAnimationFrame(() => board.current?.reveal(item.key));
   };
   const openGate = () => {
@@ -2122,11 +2124,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 where none of them is anyone's to do.
               */}
                 <TabsTrigger
-                  value="board"
+                  value="steps"
                   count={t.state === "review" ? decisionsPending : 0}
                   countLabel="decisions still to settle"
                 >
-                  Board
+                  Steps
                 </TabsTrigger>
                 <TabsTrigger
                   value="brief"
@@ -2149,7 +2151,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               </TabsList>
 
               {/* All three stay mounted: the board holds its viewport, the Changes panel its file. */}
-              <TabsContent value="board" keepMounted className="flex min-h-0 flex-col">
+              <TabsContent value="steps" keepMounted className="flex min-h-0 flex-col">
                 {/*
                   The board is what the Workflow strip's tabs scope — the cards are read for the
                   Step picked — so it is that strip's panel as well as this tab's.
@@ -2157,7 +2159,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 <div ref={boardPanel} tabIndex={-1} className="min-h-0 flex-1 outline-none">
                   <TaskBoard
                     handle={board}
-                    label={`Board for ${t.title}`}
+                    label={`Steps of ${t.title}`}
                     columns={columns}
                     state={t.state}
                     live={isRunning && live.status === "open"}

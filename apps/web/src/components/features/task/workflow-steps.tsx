@@ -138,8 +138,8 @@ export function useStepScope(task: TaskDto | null): StepScope {
  * the tabs scoped the board and the transcript. The board itself now draws every Step as a node,
  * with the one running and the one waiting on you animated, so a second row of the same Steps in
  * the header was a duplicate competing for the eye; it was removed on request. Scoping is still
- * there: the board follows the Step the run is on, and a Step's own dialog has "Show this step
- * on the board".
+ * there: the board follows the Step the run is on, and a Step's own dialog has "Show in Steps"
+ * (the board's name in the interface).
  */
 export function WorkflowPosition({ scope }: { scope: StepScope }) {
   const { binding, stepped } = scope;

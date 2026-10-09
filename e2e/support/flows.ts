@@ -273,12 +273,12 @@ export async function awaitWorkflowGate(page: Page): Promise<void> {
 }
 
 /**
- * The page's own views (Board · Brief · Changes). The page opens on the board in every state, so
+ * The page's own views (Steps · Brief · Changes). The page opens on the board in every state, so
  * a spec that wants the brief or the change has to say so — exactly as a person would.
  */
 export async function openWorkspaceTab(
   page: Page,
-  name: "Board" | "Brief" | "Changes",
+  name: "Steps" | "Brief" | "Changes",
 ): Promise<void> {
   const tab = page.getByRole("tablist", { name: "Task" }).getByRole("tab", { name, exact: true });
   await tab.click();
@@ -356,6 +356,6 @@ export function stepHeader(page: Page, name: string): Locator {
 /** Scope the board to one Step, the way the page offers it: its header, then its dialog's button. */
 export async function showStepOnBoard(page: Page, name: string): Promise<void> {
   await stepHeader(page, name).click();
-  await page.getByRole("button", { name: "Show this step on the board" }).click();
+  await page.getByRole("button", { name: "Show in Steps" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
 }

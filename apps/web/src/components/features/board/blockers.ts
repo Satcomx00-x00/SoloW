@@ -54,5 +54,5 @@ export function moveRefusal(
  * answering both would have to be told which board it was on.
  */
 export function stepMoveRefusal(): string {
-  return "Steps advance when the step's gate is satisfied — approve the review to move this on.";
+  return "Tasks move between steps on their own or when you approve a review. They cannot be dragged there.";
 }

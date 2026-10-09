@@ -241,7 +241,7 @@ describe("WorkflowsView", () => {
     });
   });
 
-  it("sets how a step is reviewed from three choices: wait, let the AI decide, or move on", async () => {
+  it("sets how a step is reviewed from three choices: wait, let the harness decide, or move on", async () => {
     const { log } = renderWithTrpc(
       <WorkflowsView />,
       handlersFor({ "workflow.updateStep": () => PIPELINE }),
@@ -250,13 +250,21 @@ describe("WorkflowsView", () => {
     const plan = await screen.findByLabelText("Permissions for Plan");
     const card = plan.closest(".react-flow__node") as HTMLElement;
     // By its text: an unmeasured canvas node is invisible to role queries in the DOM stand-in.
-    const aiDecides = within(card).getByText("AI decides").closest("button") as HTMLElement;
-    expect(aiDecides.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(aiDecides);
+    const harnessDecides = within(card)
+      .getByText("Harness decides")
+      .closest("button") as HTMLElement;
+    expect(harnessDecides.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(harnessDecides);
 
+    // The Step finished on a review, which would have waited for one whatever the gate said: the
+    // choice brings the finishing signal along, or it would change nothing.
     await waitFor(() => {
       const call = log.calls.find((c) => c.path === "workflow.updateStep");
-      expect(call?.input).toEqual({ stepId: "s1", gate: "agent-decides" });
+      expect(call?.input).toEqual({
+        stepId: "s1",
+        gate: "agent-decides",
+        advanceOn: "agent-signal",
+      });
     });
   });
 
@@ -514,10 +522,11 @@ describe("WorkflowsView", () => {
     expect(labels).toHaveLength(3);
   });
 
-  it("shows a WIP badge, because the run's live position on the graph is not drawn yet", async () => {
+  it("shows no WIP badge: Workflows are on the supported line", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
-    expect(await screen.findByText("WIP")).toBeTruthy();
+    await screen.findAllByText("Harness profile");
+    expect(screen.queryByText("WIP")).toBeNull();
   });
 });
 

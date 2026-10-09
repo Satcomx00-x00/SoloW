@@ -1822,7 +1822,7 @@ describe("TaskWorkspace todo checklist", () => {
     expect(screen.queryByRole("button", { name: /^Plan\./ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Todo list\./ })).toBeNull();
     // The legend says so too: nothing of either kind to go to.
-    const legend = screen.getByRole("navigation", { name: "On the board" });
+    const legend = screen.getByRole("navigation", { name: "In Steps" });
     expect(within(legend).getByRole("button", { name: /Plan/ }).hasAttribute("disabled")).toBe(
       true,
     );
@@ -1849,7 +1849,7 @@ describe("TaskWorkspace todo checklist", () => {
     });
 
     // The board is the thing to watch while the run is going: its todos are on it.
-    const board = await screen.findByRole("tab", { name: "Board" });
+    const board = await screen.findByRole("tab", { name: "Steps" });
     await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
     expect(await screen.findByRole("button", { name: /^Todo list\./ })).toBeDefined();
 
@@ -2058,7 +2058,7 @@ describe("TaskWorkspace workflow steps", () => {
       "Do it.",
     );
     // The board is read for the Step picked: the dialog closes and the page asks for that Step.
-    fireEvent.click(within(dialog).getByRole("button", { name: "Show this step on the board" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show in Steps" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() =>
       expect(log.calls.filter((c) => c.path === "session.get").at(-1)?.input).toEqual({
@@ -2163,7 +2163,7 @@ describe("TaskWorkspace step-scoped board", () => {
   /** Scope the board to a Step the way the page offers it: its header, then its dialog's button. */
   async function showStep(name: string) {
     fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^Step\\. ${name}`) }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show this step on the board" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show in Steps" }));
   }
 
   it("opens on the Step the run is on, and asks for only that Step's log", async () => {

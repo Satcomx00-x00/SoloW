@@ -129,8 +129,8 @@ describe("workflowColumns", () => {
   it("accents a human-gated Step with the Review hue and the automatic gates with neither", () => {
     const columns = workflowColumns([
       step({ id: "h", rank: "a", gate: "human" }),
-      step({ id: "a", rank: "b", gate: "auto" }),
-      step({ id: "u", rank: "c", gate: "auto-unless-changes" }),
+      step({ id: "a", rank: "b", gate: "auto", advanceOn: "agent-signal" }),
+      step({ id: "u", rank: "c", gate: "auto-unless-changes", advanceOn: "agent-signal" }),
     ]);
     const byId = new Map(columns.map((c) => [c.id, c]));
     expect(byId.get("step:h")?.textClassName).toBe(STATE_STYLE.review.textClassName);
@@ -142,6 +142,15 @@ describe("workflowColumns", () => {
       columns.filter((c) => c.kind === "step").map((c) => c.icon as unknown as object),
     );
     expect(icons.size).toBe(3);
+  });
+
+  it("dresses a Step finished by a review as waiting for one, whatever its gate says", () => {
+    // `advanceOn: "review"` ends the run at the review, so "Move on" there changes nothing; a
+    // column that looked automatic would tell the reader the opposite of what the run does.
+    const [column] = workflowColumns([step({ id: "a", rank: "a", gate: "auto" })]);
+    expect(column?.kind === "step" && column.gate).toBe("human");
+    expect(column?.textClassName).toBe(STATE_STYLE.review.textClassName);
+    expect(column?.hint).toBe("Wait for review: The next step waits until you approve this one.");
   });
 });
 

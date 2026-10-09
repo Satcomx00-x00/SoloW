@@ -52,7 +52,7 @@ export function Decision({ widget }: WidgetRendererProps<DecisionWidget>) {
         <p className="text-2xs text-muted-foreground">Why: {widget.reason}</p>
       ) : null}
       <p className="text-2xs text-muted-foreground">
-        The reviewer settles this on the board, at the step's gate, before the next step runs.
+        The reviewer settles this at the step's gate, before the next step runs.
       </p>
     </section>
   );

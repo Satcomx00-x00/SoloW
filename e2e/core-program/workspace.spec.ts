@@ -60,11 +60,11 @@ test.describe("the Task page", () => {
     await launchToReview(page);
 
     const tabs = page.getByRole("tablist", { name: "Task" });
-    for (const name of ["Board", "Brief", "Changes"]) {
+    for (const name of ["Steps", "Brief", "Changes"]) {
       await expect(tabs.getByRole("tab", { name, exact: true })).toBeVisible();
     }
     // At the gate the page opens on the board, where the gate is.
-    await expect(tabs.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
 
     await openWorkspaceTab(page, "Brief");
     await expect(page).toHaveURL(/[?&]tab=brief/);

@@ -86,7 +86,7 @@ export function LaunchTaskDialog({
         <DialogHeader>
           <DialogTitle>Launch {task?.title ?? "the task"}</DialogTitle>
           <DialogDescription>
-            Through a Workflow — one harness per Step, with its gates — or as a single harness run.
+            On its own, or step by step through a Workflow. Either way, you review the result.
           </DialogDescription>
         </DialogHeader>
         <div
@@ -99,7 +99,7 @@ export function LaunchTaskDialog({
             onSelect={() => setChoice(NONE)}
             icon={<Sparkles aria-hidden className="size-3.5" />}
             title="No workflow"
-            detail="One harness, one run, then the review gate."
+            detail="One harness does the work, then you review it."
           />
           {workflows.map((w) => (
             <Choice
