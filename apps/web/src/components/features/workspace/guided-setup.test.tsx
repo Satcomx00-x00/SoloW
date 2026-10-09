@@ -218,6 +218,35 @@ describe("GuidedSetup", () => {
     expect(await screen.findByLabelText("Subscription token")).toBeDefined();
   });
 
+  it("sends a container setup to the image, not to installing Claude on this machine", async () => {
+    // The test runs where the setup's Tasks run (roadmap B4), so a missing harness in a
+    // container setup is a missing harness in the image.
+    let problem: "not-installed" | "executor" = "not-installed";
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => connected({ executorKind: "docker" }),
+      "profile.executor.dockerAvailability": dockerWithImage(true),
+      "setup.test": () => ({
+        ok: false,
+        problem,
+        fixStep: null,
+        harness: "Claude Code",
+        answered: false,
+      }),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run the test" }));
+    expect(
+      await screen.findByText(/Claude Code isn't in the container image Claude runs in/),
+    ).toBeDefined();
+    expect(screen.queryByText(/npm install -g/)).toBeNull();
+
+    problem = "executor";
+    fireEvent.click(screen.getByRole("button", { name: "Run the test again" }));
+    expect(
+      await screen.findByText(/SoloW couldn't start the isolated container Claude runs in/),
+    ).toBeDefined();
+  });
+
   it("puts the core loop's switch first when someone turned it off", async () => {
     const flagged: unknown[] = [];
     renderWithTrpc(<GuidedSetup />, {

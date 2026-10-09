@@ -267,6 +267,8 @@ interface SetupSubject {
     /** When its credential was last written — null when the Secret it names is gone. */
     secretUpdatedAt: string | null;
   } | null;
+  /** The executor a new Task would get — where the test runs (`runSetupTest`). */
+  executorProfileId: string | null;
   executorKind: ExecutorKind | null;
   /** See `isSetupFallback`. */
   executorReplaceable: boolean;
@@ -315,6 +317,7 @@ async function setupSubject(ctx: RequestContext): Promise<SetupSubject> {
 
   return {
     profile: profile ?? null,
+    executorProfileId: executor?.id ?? null,
     executorKind: executor?.kind ?? null,
     executorReplaceable: executor ? isSetupFallback(executor, executors) : false,
   };
@@ -444,6 +447,7 @@ const PROBLEM_FOR: Record<HarnessProbeFailure, SetupTestProblem> = {
   missing: "not-installed",
   credential: "credential",
   quota: "quota",
+  executor: "executor",
   harness: "harness",
 };
 
@@ -451,12 +455,17 @@ type Probe = (input: {
   workspaceId: string;
   agentProfileId: string;
   turn: boolean;
+  executorProfileId?: string;
 }) => Promise<HarnessProbeReport>;
 
 /**
  * The test run: one real prompt to the agent a new Task would use, through the orchestrator's
  * probe (`answerProbeTurn`), so it spends a handful of tokens and proves the binary, the
  * credential and the billing environment a run would get — not merely that a process started.
+ *
+ * And *where* a run would get them: the probe is told the executor a new Task would get, so a
+ * setup that put Claude in a container is tested in one, against the image, and not by whatever
+ * happens to be installed on the orchestrator's host (roadmap B4).
  *
  * A pass is remembered against the Profile and the version of its credential it tested (see
  * `isVerified`). A failure is answered as a cause and the step that fixes it, never as the
@@ -468,7 +477,7 @@ export async function runSetupTest(
   ctx: RequestContext,
   probe: Probe = (input) => orchestrator.probeHarnessProfile(input),
 ): Promise<SetupTestResultDto> {
-  const { profile } = await setupSubject(ctx);
+  const { profile, executorProfileId } = await setupSubject(ctx);
   if (!profile?.secretUpdatedAt) {
     return {
       ok: false,
@@ -481,7 +490,12 @@ export async function runSetupTest(
 
   let report: HarnessProbeReport;
   try {
-    report = await probe({ workspaceId: ctx.workspaceId, agentProfileId: profile.id, turn: true });
+    report = await probe({
+      workspaceId: ctx.workspaceId,
+      agentProfileId: profile.id,
+      turn: true,
+      ...(executorProfileId ? { executorProfileId } : {}),
+    });
   } catch {
     return {
       ok: false,

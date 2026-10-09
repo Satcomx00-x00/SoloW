@@ -133,7 +133,10 @@ export type ConnectClaudeResultDto = z.infer<typeof connectClaudeResultDto>;
  *
  * - `not-connected` — nothing to test yet.
  * - `unreachable` — the orchestrator did not answer the request at all.
- * - `not-installed` — the harness binary is not on the orchestrator's host.
+ * - `not-installed` — the harness binary is not where the setup's Tasks run: on the
+ *   orchestrator's host, or in the executor image.
+ * - `executor` — the container the setup's Tasks run in could not be started: no Docker daemon,
+ *   no executor image, or an image the driver cannot use.
  * - `credential` — the provider refused the token or key.
  * - `quota` — the plan's usage window is spent; the setup is fine and the test can wait.
  * - `harness` — it started and then failed some other way.
@@ -142,6 +145,7 @@ export const setupTestProblemSchema = z.enum([
   "not-connected",
   "unreachable",
   "not-installed",
+  "executor",
   "credential",
   "quota",
   "harness",

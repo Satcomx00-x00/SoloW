@@ -49,7 +49,8 @@ function failed(reason: string): HarnessExplainResult {
 
 function reasonFor(cause: unknown, command: string): string {
   const message = cause instanceof Error ? cause.message : String(cause);
-  if (/ENOENT|not found|No such file/i.test(message)) {
+  // The container driver's own refusal already names the image; see `reasonFor` in `probe.ts`.
+  if (/ENOENT|not found|No such file/i.test(message) && !/in the executor image/.test(message)) {
     return `"${command}" could not be started — is it installed and on PATH for the orchestrator?`;
   }
   return message;
