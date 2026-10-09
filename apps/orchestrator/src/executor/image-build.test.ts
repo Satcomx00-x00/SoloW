@@ -296,6 +296,17 @@ describe("describeImageBuildFailure", () => {
     expect(said("error during connect: Head http://docker/_ping: dial unix")).toContain(
       "isn't running",
     );
+    // Docker 29.8's own words, from a real build pointed at a socket with no daemon behind it.
+    expect(
+      said(
+        "ERROR: failed to connect to the docker API at unix:///nonexistent/docker.sock; check if the path is correct and if the daemon is running: dial unix /nonexistent/docker.sock: connect: no such file or directory",
+      ),
+    ).toContain("isn't running");
+    expect(
+      said(
+        "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock",
+      ),
+    ).toContain("isn't allowed to use Docker");
     expect(
       said("ERROR: failed to copy: write /var/lib/docker/x: no space left on device"),
     ).toContain("disk space");

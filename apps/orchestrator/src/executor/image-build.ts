@@ -208,8 +208,10 @@ export function describeImageBuildFailure(args: {
   ) {
     return "This account isn't allowed to use Docker. Add it to the docker group and sign in again (or use rootless Docker), then build again.";
   }
+  // Older CLIs say "Cannot connect to the Docker daemon"; 29.x says "failed to connect to the
+  // docker API at … check if the path is correct and if the daemon is running" (seen on 29.8).
   if (
-    /cannot connect to the docker daemon|is the docker daemon running|error during connect/i.test(
+    /cannot connect to the docker daemon|failed to connect to the docker api|is the docker daemon running|if the daemon is running|error during connect/i.test(
       text,
     )
   ) {
