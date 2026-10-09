@@ -145,11 +145,19 @@ curl -fsS --max-time 20 "http://localhost:$WEB_PORT/" > /dev/null || {
     exit 1
 }
 
-echo "==> orchestrator responds"
-# `/api/inngest` is the introspection route the Dev Server itself polls, so a 200 here means the
-# orchestrator is not merely listening but has its functions registered.
-curl -fsS --max-time 20 "http://localhost:$WS_PORT/api/inngest" > /dev/null || {
-    echo "smoke-tarball: the orchestrator did not answer on /api/inngest." >&2
+echo "==> orchestrator responds, and only to signed calls"
+# `/api/inngest` is the Inngest serve handler. The engine runs as `inngest start`, which signs
+# every call it makes, so the handler refuses an unsigned one: a 401 says it is mounted and
+# checking signatures, which is what stops anyone but the engine invoking a function (B2). A 200
+# would mean it is not. Signing a call here would mean re-implementing the SDK's canonical body, so
+# whether functions were registered is read from the orchestrator's own boot line instead.
+CODE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "http://localhost:$WS_PORT/api/inngest" || true)"
+[ "$CODE" = 401 ] || {
+    echo "smoke-tarball: /api/inngest answered an unsigned call with '$CODE', not 401." >&2
+    exit 1
+}
+grep -qE '[1-9][0-9]* Inngest function\(s\) registered' "$WORK/solow.log" || {
+    echo "smoke-tarball: the orchestrator registered no Inngest functions." >&2
     exit 1
 }
 
