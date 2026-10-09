@@ -90,7 +90,7 @@ Recharts.
 | 33 | File tree | A tree of the changed files in the Changes tab; no browser of the whole worktree | 🟡 | A lazy listing of the worktree through the executor's jailed filesystem, which exists | **new** virtualised tree |
 | 34 | Embedded VS Code | — | ❌ | A `vscode://` deep link, not an embed | "Open in editor" menu |
 | 35 | Browser preview panel | — (`Executor.forward` exists; nothing uses it) | ❌ | A dev-server lifecycle owned by the executor profile | Preview panel with a sandboxed iframe |
-| 36 | Git changes panel | Source-control panel: stage, unstage, discard; staging is what approval commits; split/inline diff; per-file "viewed" marks. The patch is capped at 256 KB, generated files folded first | ✅ | Per-file lazy patch fetch to remove the cap | `existing` DiffView |
+| 36 | Git changes panel | A **read-only** changes panel built from the diff captured at the end of the harness's turn: per-file status, split/inline diff, per-file "viewed" marks. Stage, unstage and discard are not wired (the orchestrator has the git operations, nothing calls them), and approval commits every change in the worktree except copied setup files. The patch is capped at 256 KB, generated files folded first | 🟡 | Wire the live worktree status and the stage/discard operations ([0017](../decisions/0017-worktree-git-rpc.md)), then per-file lazy patch fetch | `existing` DiffView and source-control panel |
 | 37 | Review dialog with per-repo grouping | One decision across repositories, grouped by repository and branch, each consequence shown before confirming | ✅ | Built | `existing` review gate |
 | 38 | Chat with the harness | Composer plus a typed transcript (text and tool rows) rendered as Markdown with code highlighting | ✅ | Missing: a `/` command menu and attachments | `existing` composer |
 | 39 | Approve / reject / request changes | All three recorded with actor and time; line-anchored notes on the diff, sent to the harness as `path:line` feedback | ✅ | Notes are flattened into the feedback text, not stored as structured data on the review | `existing` diff gutter notes |
@@ -192,8 +192,8 @@ Recharts.
 
 | | Count | Share |
 |---|---|---|
-| ✅ Built | 52 | 50% |
-| 🟡 Partial | 25 | 24% |
+| ✅ Built | 51 | 49% |
+| 🟡 Partial | 26 | 25% |
 | ❌ Not built | 19 | 18% |
 | ⏳ Later (0031) | 5 | 5% |
 | 🚫 Won't do | 4 | 4% |
