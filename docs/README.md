@@ -1,9 +1,11 @@
 # SoloW — Documentation
 
-SoloW is an open-source, self-hostable platform for orchestrating many AI
-coding-harness CLIs (Claude Code, Codex, Gemini CLI, and 25+ others) in parallel,
-with a review-first workflow. It is a business-level alternative to
-comparable tools in the category.
+SoloW is an open-source, self-hostable platform for running AI coding-harness CLIs in
+parallel on your own machine, with a review-first workflow. Two harnesses come ready to use,
+Claude Code and opencode; any other must be added by hand
+([F04](./features/F04-harness-orchestration.md)). SoloW 1.0 is built for one person, the solo
+power user ([0031](./decisions/0031-focus-on-the-solo-power-user.md)); hosted team use is
+Later.
 
 This documentation is **business-level and implementation-agnostic** — it describes
 *what* the product does and *why*, not *how* it is coded. It contains no source code
