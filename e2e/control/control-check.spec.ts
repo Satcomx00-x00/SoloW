@@ -373,6 +373,11 @@ test.describe("control check — the main line of the product, end to end", () =
       // The board was compiled moments ago, but a loaded runner can still be slow to serve it.
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
 
+      // The Issue's delete goes to its Project's issue list, which nothing earlier in the walk
+      // opens — so its first `next dev` compile landed inside the expect below and outlasted it
+      // (the RSC fetch at status -1, the hot-update 15 s later). Visited first, as the Task's
+      // delete destination is.
+      await warmRoutes(page, [`/projects/${projectId}/issues`]);
       await page.goto(`/issues/${issueId}`);
       await page.getByRole("button", { name: "Delete issue" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete issue" }).click();
