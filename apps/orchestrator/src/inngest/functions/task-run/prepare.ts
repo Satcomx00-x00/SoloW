@@ -76,8 +76,9 @@ function cloneCredentialFor(binding: TaskRepositoryBinding): CloneCredential | u
  * and report the Task done. The number is a sanity limit on a hand-authored list, not a product
  * decision — a Workflow past it is refused by name so somebody can look at it.
  *
- * It also bounds the loop: `maxRounds` is `MAX_REVIEW_ROUNDS * stepCount`, so without this a
- * pathological Step list would decide how long one Inngest run may live.
+ * It also bounds the loop: `maxRounds` in `runTaskLifecycle` is
+ * `MAX_REVIEW_ROUNDS * (1 + MAX_AUTO_CONTINUE_ROUNDS) * stepCount`, at most 400 rounds at this
+ * limit, so without it a pathological Step list would decide how long one Inngest run may live.
  */
 const MAX_WORKFLOW_STEPS = 20;
 
@@ -746,8 +747,8 @@ export async function prepareWorkspace(scope: RunScope, entry: RunEntry, attempt
           // that is not a place to be paraphrasing credential-helper arguments into a column the
           // UI renders (Principle IV). The detail goes to the log, where it belongs.
           captureException(log, cause, { stage: "worktree-provision" });
-          // Undo what this step already made. The run returns before the lifecycle's own
-          // `cleanup` is reachable, and nothing outside this loop ever learns those directories
+          // Undo what this step already made. The run returns before any worktree is recorded,
+          // so neither the retention sweep nor anything else ever learns those directories
           // exist — a three-repository Task whose third repository is unreachable would leave
           // two worktrees on disk with their branches checked out, blocking the next launch from
           // reusing them. Each removal is independently best-effort: one that fails must not

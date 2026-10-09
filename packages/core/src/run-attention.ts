@@ -26,9 +26,9 @@ export const RECLAIM_STALE_MS = 10 * 60 * 1000;
 /**
  * How long a parked run sleeps before it wakes itself up.
  *
- * The park step's own window (`PARK_SLEEP_MS` in the orchestrator's run engine), restated because
- * neither the sweep nor the web app may import the run engine. `reconcile.test.ts` pins the two
- * equal, so changing one alone is a red test rather than a sweep that condemns sleepers.
+ * Roughly one quota window; a real budget check would replace the guess rather than tune it.
+ * Defined here because the reconcile sweep and the web app read it and neither may import the run
+ * engine; the engine's park step sleeps for exactly this (`PARK_SLEEP_MS` is this value).
  */
 export const PARK_WINDOW_MS = 5 * 60 * 60 * 1000;
 

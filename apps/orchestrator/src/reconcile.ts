@@ -443,9 +443,9 @@ export async function clearStrandedPark(
 
 /*
  * `PARK_WINDOW_MS` (re-exported above, defined in `@solow/core`) is how long a parked run sleeps
- * before it wakes itself up: the park step's `PARK_SLEEP_MS`, restated because the reconciler must
- * not import the durable workflow module. `reconcile.test.ts` asserts the two are equal, so
- * changing one alone is a red test rather than a sweep that starts condemning sleepers.
+ * before it wakes itself up. The park step's `PARK_SLEEP_MS` is that same value, imported rather
+ * than restated, because the reconciler must not import the durable workflow module and the
+ * window has to have one home both can reach.
  */
 
 /**

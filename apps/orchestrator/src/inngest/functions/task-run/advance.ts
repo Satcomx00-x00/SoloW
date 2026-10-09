@@ -193,8 +193,11 @@ export async function reportStepFinished(
  * no second Task. The worktrees are deliberately kept, because the next Step continues in
  * them — `resuming` in the run body already runs every round after the first inside the
  * primary worktree, so Step 2 sees Step 1's uncommitted work with no new mechanism. Ending
- * the run and re-emitting `task.launch.requested` was the alternative and it destroys that
- * work: the `finally` disposes the executor and `cleanup` removes every worktree.
+ * the run and re-emitting `task.launch.requested` was the alternative. It would no longer lose
+ * the work — worktrees outlive the run until the retention sweep (Decision 0025), and a new run
+ * re-provisions them idempotently, as a decision's run does (ADR 0030) — but it would pay a
+ * run's entry again (load, preflight, a container start on Docker) for a move no person asked
+ * to make.
  *
  * Returns a terminal result when the run cannot go on, and null when the loop continues.
  */
