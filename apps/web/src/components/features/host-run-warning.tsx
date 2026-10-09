@@ -18,9 +18,14 @@ import { ShieldAlert } from "lucide-react";
 export function HostRunWarning({
   executorKind,
   permissionMode,
+  title = HOST_RUN_WARNING_TITLE,
+  children = HOST_RUN_WARNING,
 }: {
   executorKind: ExecutorKind | null | undefined;
   permissionMode: HarnessPermissionMode | null | undefined;
+  /** The same warning in other words — the guided setup says it without the settings' terms. */
+  title?: string;
+  children?: string;
 }) {
   if (!runsUnattendedOnHost(executorKind, permissionMode)) return null;
   return (
@@ -30,8 +35,8 @@ export function HostRunWarning({
     >
       <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
       <div className="space-y-0.5">
-        <p className="font-medium">{HOST_RUN_WARNING_TITLE}</p>
-        <p className="text-muted-foreground text-xs leading-relaxed">{HOST_RUN_WARNING}</p>
+        <p className="font-medium">{title}</p>
+        <p className="text-muted-foreground text-xs leading-relaxed">{children}</p>
       </div>
     </div>
   );

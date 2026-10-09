@@ -145,7 +145,15 @@ function WhereItRuns({ setup }: { setup: WorkspaceSetupDto }) {
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground text-sm">Claude will work on this machine.</p>
-      <HostRunWarning executorKind="local" permissionMode={permissionMode} />
+      <HostRunWarning
+        executorKind="local"
+        permissionMode={permissionMode}
+        title="It works with your access, without asking first"
+      >
+        Claude can read, change and send anything your account can, and it does not stop to check
+        before it acts. An issue or a web page written to mislead it could steer it, so point it
+        only at repositories and issues you trust.
+      </HostRunWarning>
       {docker.data?.available && (
         <p className="text-muted-foreground text-xs leading-relaxed">
           Docker is installed here, so Claude could work in an isolated container instead. That

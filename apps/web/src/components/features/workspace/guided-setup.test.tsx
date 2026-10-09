@@ -80,7 +80,9 @@ describe("GuidedSetup", () => {
       "profile.executor.dockerAvailability": () => ({ available: true, reason: null }),
     });
 
-    expect(await screen.findByText("This run is not isolated")).toBeDefined();
+    expect(
+      await screen.findByText("It works with your access, without asking first"),
+    ).toBeDefined();
     // Docker is there, but a container needs an image with Claude Code in it — offered, not made.
     expect(await screen.findByText(/Docker is installed here/)).toBeDefined();
   });
