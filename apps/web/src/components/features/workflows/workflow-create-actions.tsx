@@ -52,8 +52,15 @@ function NewWorkflowButton() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const create = trpc.workflow.create.useMutation({
-    onSuccess: (created) => {
-      utils.workflow.list.invalidate();
+    onSuccess: async (created) => {
+      // Cancelled before invalidating: a Create pressed while the page's first read of the list is
+      // still out would otherwise have the invalidation join that read, which began before the
+      // write. The canvas picks its Workflow out of that list, so it would open on "No workflows
+      // yet" — or on another pipeline — and the 30 s staleTime keeps it there (the same React
+      // Query behaviour `SplitTaskButton` notes). A cancelled read goes back to unloaded, and the
+      // invalidation reads anew.
+      await utils.workflow.list.cancel();
+      void utils.workflow.list.invalidate();
       setName("");
       setOpen(false);
       router.push(`/workflows/${created.id}`);

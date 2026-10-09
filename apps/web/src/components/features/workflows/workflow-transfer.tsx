@@ -147,8 +147,11 @@ export function ImportWorkflowDialog({ trigger }: { trigger: ReactNode }) {
   ];
 
   const imported = trpc.workflow.import.useMutation({
-    onSuccess: (result) => {
-      utils.workflow.list.invalidate();
+    onSuccess: async (result) => {
+      // Cancelled first, so a list read still in flight cannot answer for the new pipeline
+      // (see `NewWorkflowButton`).
+      await utils.workflow.list.cancel();
+      void utils.workflow.list.invalidate();
       // Nothing was substituted, so there is nothing to report: go straight to the pipeline.
       const clean =
         result.unmatchedHarnessProfiles.length === 0 &&
