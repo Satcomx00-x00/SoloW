@@ -928,7 +928,7 @@ echo "==> AC-4  orphan reconciliation, against a simulated crash"
 # "orphan reconciliation tested against a simulated crash" in those words.
 #
 # Two containers, identical in every respect the reaper can see except one: the epoch in
-# `/run/solow/owner`. Same deployment, same labels, a Task row in `review` and a Session whose id
+# `/run/solow/owner`. Same deployment, same labels, a Task row in `running` and a Session whose id
 # matches the container's `solow.run` for both — so the sweep's verdict on each turns on the claim
 # and on nothing else. That is what makes this a differential rather than two unrelated
 # containers, and it is why both directions are asserted: a reaper that removes everything passes
@@ -1021,8 +1021,10 @@ if (readback.stdout.trim() !== crashed) {
 
 // A real database with real migrations, because the reaper's evidence of life is read out of one
 // with two joins and a state test. Rows that made both containers look *dead* would let a reaper
-// that removes everything pass, so both Tasks are seeded the way a live run at the review gate
-// leaves them: `review`, no failure reason, and the newest Session matching `solow.run`.
+// that removes everything pass, so both Tasks are seeded the way a live run leaves them while it
+// holds its container: `running`, no failure reason, and the newest Session matching `solow.run`.
+// Not `review`: since ADR 0030 a run ends at the gate and disposes of its container, so a `review`
+// row holds nothing and the reaper rightly takes both.
 const db = createTestDb();
 await db.insert(workspaceTable).values({ id: workspace, name: workspace, ownerUserId: "smoke" });
 await db.insert(issue).values({ id: "iss-smoke", workspaceId: workspace, title: "smoke" });
@@ -1057,7 +1059,7 @@ for (const box of [orphan, live]) {
     workspaceId: workspace,
     issueId: "iss-smoke",
     title: box.ids.taskId,
-    state: "review",
+    state: "running",
     agentProfileId: "ap-smoke",
     executorProfileId: "ex-smoke",
   });
@@ -1096,8 +1098,8 @@ sed 's/^/    /' "$WORK/reap.log"
 
 # Both halves asked of the daemon. The first is the one a reaper that does nothing fails; the
 # second is the one a reaper that removes everything fails, and it is the expensive one to get
-# wrong — a container removed out from under a run at the review gate takes the harness's exec with
-# it and fails the round with no explanation an operator can see.
+# wrong — a container removed out from under a live run takes the harness's exec with it and
+# fails the round with no explanation an operator can see.
 ORPHANED="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE" --filter "label=solow.task=reap-orphan")"
 [ -z "$ORPHANED" ] || {
     echo "smoke-docker-executor: the reaper left a crashed orchestrator's container behind:" >&2

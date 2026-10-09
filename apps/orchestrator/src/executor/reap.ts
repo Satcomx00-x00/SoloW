@@ -280,8 +280,8 @@ function heldByRun(row: { state: TaskState; failureReason: string | null }): boo
  * `ensureContainer` writes this process's epoch into the container's own tmpfs every time it
  * creates or adopts one, so the answer is no for a container the previous, crashed process left
  * behind — the one case neither the Task table nor `heldByRun` can describe, because a run
- * suspended at the review gate has no process and no registry entry even while it is perfectly
- * alive.
+ * asleep in a park, or between two durable steps, has no process and no registry entry even
+ * while it is perfectly alive.
  *
  * Any failure is a no: the exec fails when the container has stopped, when the file was never
  * written, and when the daemon has gone — none of which is a live run holding a workspace, and
