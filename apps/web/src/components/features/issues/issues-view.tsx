@@ -5,7 +5,7 @@ import { CommonErrorCode, issueSourceSchema } from "@solow/contracts";
 import { buildProjectHierarchy } from "@solow/core";
 import { ChevronRight, ListFilter, Search, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { FlagDisabled } from "@/components/features/shared/flag-disabled";
@@ -84,6 +84,12 @@ export function readFilters(params: URLSearchParams): IssueFilters {
   };
 }
 
+/**
+ * The filters as a URL's search part — `?…`, or nothing. Without a path on purpose: the view is
+ * mounted at a Project's issue list and at Unassigned, and a filter belongs to whichever page it
+ * was set on. It used to answer `/issues?…`, a route that went when the lists moved under their
+ * Projects, so every filter and status tab led to a 404.
+ */
 export function toSearchParams(filters: IssueFilters): string {
   const next = new URLSearchParams();
   if (filters.status) next.set("status", filters.status);
@@ -91,14 +97,14 @@ export function toSearchParams(filters: IssueFilters): string {
   if (filters.source) next.set("source", filters.source);
   for (const label of filters.labels) next.append("label", label);
   const query = next.toString();
-  return query ? `/issues?${query}` : "/issues";
+  return query ? `?${query}` : "";
 }
 
-function StatusFilter({ filters }: { filters: IssueFilters }) {
+function StatusFilter({ filters, pathname }: { filters: IssueFilters; pathname: string }) {
   const tab = (status: IssueStatus | null, label: string) => (
     <Link
       key={label}
-      href={toSearchParams({ ...filters, status })}
+      href={`${pathname}${toSearchParams({ ...filters, status })}`}
       scroll={false}
       aria-current={filters.status === status ? "page" : undefined}
       className={cn(
@@ -354,11 +360,12 @@ export function IssuesView({
 } = {}) {
   const providerName = useProviderNames();
   const router = useRouter();
+  const pathname = usePathname();
   const params = useSearchParams();
   const filters = readFilters(new URLSearchParams(params.toString()));
 
   const apply: Apply = (next) =>
-    router.replace(toSearchParams({ ...filters, ...next }), { scroll: false });
+    router.replace(`${pathname}${toSearchParams({ ...filters, ...next })}`, { scroll: false });
 
   const issues = trpc.issue.list.useQuery({
     ...WHOLE_PAGE,
@@ -404,7 +411,7 @@ export function IssuesView({
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-6 py-5">
       <div className="space-y-3">
-        <StatusFilter filters={filters} />
+        <StatusFilter filters={filters} pathname={pathname} />
         <FilterBar
           filters={filters}
           apply={apply}

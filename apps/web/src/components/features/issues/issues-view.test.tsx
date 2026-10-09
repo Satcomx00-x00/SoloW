@@ -27,7 +27,7 @@ mock.module("next/navigation", () => ({
     replace: (href: string) => replaced.push(href),
     refresh: () => {},
   }),
-  usePathname: () => "/issues",
+  usePathname: () => "/projects/p1/issues",
   useSearchParams: () => url,
   useParams: () => ({}),
 }));
@@ -103,8 +103,8 @@ describe("issue filters ↔ URL", () => {
 
   it("round-trips back to a query string, and drops what is not set", () => {
     const filters = readFilters(new URLSearchParams("q=latch&label=hardware&label=ui"));
-    expect(toSearchParams(filters)).toBe("/issues?q=latch&label=hardware&label=ui");
-    expect(toSearchParams({ status: null, query: "", labels: [], source: null })).toBe("/issues");
+    expect(toSearchParams(filters)).toBe("?q=latch&label=hardware&label=ui");
+    expect(toSearchParams({ status: null, query: "", labels: [], source: null })).toBe("");
   });
 });
 
@@ -177,7 +177,22 @@ describe("IssuesView", () => {
     });
 
     fireEvent.click(await screen.findByRole("button", { name: /Clear/ }));
-    await waitFor(() => expect(replaced.at(-1)).toBe("/issues?status=open"));
+    await waitFor(() => expect(replaced.at(-1)).toBe("/projects/p1/issues?status=open"));
+  });
+
+  it("keeps the status tabs on the page they sit on, and the other filters with them", async () => {
+    // The list is mounted under a Project and at Unassigned; there is no `/issues` page, and the
+    // tabs once linked to it — every one of them a 404.
+    at("q=latch&label=hardware");
+    renderWithTrpc(<IssuesView projectId="p1" />, {
+      "issue.list": () => ({ items: [issueWith()], nextCursor: null }),
+      "issue.labels": () => ["hardware"],
+    });
+
+    const open = await screen.findByRole("link", { name: "Open" });
+    expect(open.getAttribute("href")).toBe(
+      "/projects/p1/issues?status=open&q=latch&label=hardware",
+    );
   });
 
   it("pushes a typed search into the URL once, after the typing stops", async () => {
@@ -193,7 +208,9 @@ describe("IssuesView", () => {
 
     // Debounced: a replace per keystroke would re-run the query mid-word.
     expect(replaced).toEqual([]);
-    await waitFor(() => expect(replaced).toEqual(["/issues?q=latch"]), { timeout: 2000 });
+    await waitFor(() => expect(replaced).toEqual(["/projects/p1/issues?q=latch"]), {
+      timeout: 2000,
+    });
   });
 
   it("says the filters are what is hiding everything, not that there is nothing", async () => {
