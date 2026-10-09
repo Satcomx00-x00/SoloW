@@ -2,7 +2,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode, type TaskState } from "@solow/contracts";
-import { harnessProfile, session as sessionTable, task as taskTable } from "@solow/db";
+import {
+  harnessProfile,
+  session as sessionTable,
+  task as taskTable,
+  workflow as workflowTable,
+} from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { seedIssue, seedWorkspaceGraph } from "../dal/test-fixtures.js";
@@ -224,6 +229,90 @@ describe("concurrency cap under simultaneous starts (F5)", () => {
     db.run(sql`DROP TRIGGER no_session`);
     await c.task.launch({ id: second });
     expect(await runningFor(db, fx.agentProfileId)).toBe(1);
+  });
+});
+
+/**
+ * A Task on no Workflow whose harness has finished stays `running` until a person opens its review
+ * (`finishRound`): opening the gate is their click, not the run's. Its run has ended and released
+ * its executor, so nothing is spending the subscription the cap protects — and counting it let N
+ * finished, unreviewed Tasks refuse every start on a cap of N.
+ */
+describe("a finished Task waiting for its review to be opened", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+    resetRateLimits();
+  });
+
+  /** What `to-review` leaves: the row still `running`, the declaration recorded on it. */
+  async function finish(taskId: string) {
+    await db
+      .update(taskTable)
+      .set({
+        completedAt: new Date().toISOString(),
+        completedOutcome: "changes_ready",
+        completedSummary: "done",
+      })
+      .where(eq(taskTable.id, taskId));
+  }
+
+  it("holds no slot on no Workflow", async () => {
+    const fx = await seedWorkspaceGraph(db, "finished");
+    await setCap(db, fx.agentProfileId, 1);
+    const [finished, waiting] = await seedTasks(db, fx, 2, "ready");
+    if (!finished || !waiting) throw new Error("seed");
+    const c = caller(db, fx.workspaceId);
+
+    await c.task.launch({ id: finished });
+    await finish(finished);
+
+    await c.task.launch({ id: waiting });
+    expect(await runningFor(db, fx.agentProfileId)).toBe(2);
+  });
+
+  it("still holds its slot under a Workflow, where the run may carry on into the next Step", async () => {
+    // `to-review` records the declaration before the Step's rule decides whether the cursor moves,
+    // and an advance runs the next Step's harness in the same run. Releasing the slot there would
+    // let another start take it in between.
+    const fx = await seedWorkspaceGraph(db, "mid-advance");
+    await setCap(db, fx.agentProfileId, 1);
+    const [onWorkflow, waiting] = await seedTasks(db, fx, 2, "ready");
+    if (!onWorkflow || !waiting) throw new Error("seed");
+    const [wf] = await db
+      .insert(workflowTable)
+      .values({ workspaceId: fx.workspaceId, name: "pipeline" })
+      .returning();
+    await db
+      .update(taskTable)
+      .set({ workflowId: wf?.id ?? "" })
+      .where(eq(taskTable.id, onWorkflow));
+    const c = caller(db, fx.workspaceId);
+
+    await c.task.launch({ id: onWorkflow });
+    await finish(onWorkflow);
+
+    await expect(c.task.launch({ id: waiting })).rejects.toThrow(
+      TaskErrorCode.ConcurrencyCapReached,
+    );
+  });
+
+  it("takes a slot again on any start, even one carrying an earlier run's declaration", async () => {
+    // A finished card dragged to Failed keeps its declaration. A Retry is a new run, and counts
+    // from the moment it claims the row, not from whenever that run records a declaration of its own.
+    const fx = await seedWorkspaceGraph(db, "retried");
+    await setCap(db, fx.agentProfileId, 1);
+    const [retried, waiting] = await seedTasks(db, fx, 2, "failed");
+    if (!retried || !waiting) throw new Error("seed");
+    await finish(retried);
+    const c = caller(db, fx.workspaceId);
+
+    await c.task.retry({ id: retried });
+
+    await expect(c.task.retry({ id: waiting })).rejects.toThrow(
+      TaskErrorCode.ConcurrencyCapReached,
+    );
   });
 });
 
