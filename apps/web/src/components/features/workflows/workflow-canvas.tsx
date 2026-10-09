@@ -1955,16 +1955,13 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
         )}
         {/* The pipeline's name floats on the canvas instead of sitting in a header strip: a band
             above a full-bleed canvas would take back the vertical space going full-bleed just
-            won. The WIP badge rides with it — the Monitor half of F03 (a run's live position on
-            this graph) is not built yet, and the badge says so before a click does. */}
+            won. No "WIP" badge beside it: Workflows are on the supported line (decision 0031), and
+            a live run is watched on its Task's Steps, not here. */}
         <Panel
           position="top-left"
           className="flex items-center gap-2 rounded-lg border bg-card/85 px-2.5 py-1.5 shadow-sm backdrop-blur"
         >
           <span className="font-medium text-sm">{workflow.name}</span>
-          <Badge variant="outline" className="text-2xs">
-            WIP
-          </Badge>
         </Panel>
         {workflow.steps.length === 0 && (
           <Panel position="top-center" className="flex flex-col items-center gap-2 pt-16">

@@ -43,10 +43,6 @@ describe("the destinations", () => {
     expect(PROJECT_SECTIONS.map((s) => s.label)).toEqual(["Planning", "Board", "Issues"]);
   });
 
-  it("marks only Workflows as unfinished", () => {
-    expect(WORKSPACE_SECTIONS.filter((s) => s.wip).map((s) => s.href)).toEqual(["/workflows"]);
-  });
-
   it("never uses one icon for two destinations side by side", () => {
     // Unassigned and a Project's Issues both list issues; one icon for both read as one place.
     const unassigned = WORKSPACE_SECTIONS.find((s) => s.href === "/unassigned");

@@ -161,18 +161,6 @@ function ReviewCount({ value }: { value: number }) {
   );
 }
 
-function Wip() {
-  return (
-    <span
-      // The row's own name already says "(work in progress)" to a screen reader via `title`.
-      aria-hidden
-      className="shrink-0 rounded border px-1 text-[9px] text-muted-foreground uppercase leading-[1.5]"
-    >
-      WIP
-    </span>
-  );
-}
-
 /** A Project's initial in a tinted square: tells two Projects apart before their names are read. */
 function ProjectGlyph({ title, active }: { title: string; active: boolean }) {
   return (
@@ -346,7 +334,7 @@ function ProjectRow({
                 icon={s.icon}
                 depth={1}
                 active={place.projectSection?.path === s.path}
-                trailing={s.wip ? <Wip /> : s.path === "/board" ? badge : undefined}
+                trailing={s.path === "/board" ? badge : undefined}
               />
             ))}
           </ul>
@@ -386,11 +374,8 @@ function WorkspaceGroup({ place }: { place: Place }) {
                 icon={s.icon}
                 active={here && !nests}
                 open={nests}
-                title={s.wip ? `${s.label} (work in progress)` : undefined}
                 trailing={
-                  s.wip ? (
-                    <Wip />
-                  ) : s.href === "/unassigned" && unassignedCount > 0 ? (
+                  s.href === "/unassigned" && unassignedCount > 0 ? (
                     <Count value={unassignedCount} />
                   ) : undefined
                 }

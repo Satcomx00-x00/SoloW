@@ -294,7 +294,7 @@ describe("Sidebar — Workflows, edge cases", () => {
       handlers({ "workflow.list": () => [] }),
     );
 
-    await waitFor(() => expect(current().map((l) => l.textContent)).toEqual(["WorkflowsWIP"]));
+    await waitFor(() => expect(current().map((l) => l.textContent)).toEqual(["Workflows"]));
     expect(screen.queryByRole("list", { name: "Workflows" })).toBeNull();
   });
 
@@ -529,11 +529,13 @@ describe("Sidebar — the foot of the column", () => {
     expect(screen.getByRole("link", { name: "Unassigned" }).textContent).toBe("Unassigned");
   });
 
-  it("marks Workflows as work in progress for a screen reader as well as by eye", async () => {
+  it("names Workflows plainly, with no work-in-progress marker", async () => {
+    // Workflows are on the supported line (decision 0031): a "WIP" badge on a finished,
+    // supported area told a newcomer to stay away from it (finding D5).
     pathname = "/projects";
     renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, handlers());
-    const workflows = screen.getByRole("link", { name: /Workflows/ });
-    expect(workflows.getAttribute("title")).toBe("Workflows (work in progress)");
-    expect(workflows.textContent).toContain("WIP");
+    const workflows = screen.getByRole("link", { name: "Workflows" });
+    expect(workflows.getAttribute("title")).toBeNull();
+    expect(workflows.textContent).toBe("Workflows");
   });
 });

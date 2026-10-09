@@ -514,10 +514,11 @@ describe("WorkflowsView", () => {
     expect(labels).toHaveLength(3);
   });
 
-  it("shows a WIP badge, because the run's live position on the graph is not drawn yet", async () => {
+  it("shows no WIP badge: Workflows are on the supported line", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
-    expect(await screen.findByText("WIP")).toBeTruthy();
+    await screen.findAllByText("Harness profile");
+    expect(screen.queryByText("WIP")).toBeNull();
   });
 });
 
