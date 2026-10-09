@@ -49,8 +49,10 @@ The default Kanban columns represent these states:
 - **Ready** — fully configured (Harness, Executor, Repositories) and eligible to run.
 - **Running** — a Harness is actively working.
 - **Review** — changes are proposed and awaiting human decision.
-- **Parked** — paused because a subscription quota is exhausted or a harness credential
-  expired; resumes automatically or on user action (see [F06](../features/F06-authentication-billing.md)).
+- **Parked** — paused because the harness stopped on what reads as an exhausted quota or a
+  rate limit; runs again by itself after a fixed five-hour wait, or on user action. An expired
+  credential is not Parked: it ends the run as Failed with a distinct "Credential expired"
+  reason (see [F06](../features/F06-authentication-billing.md)).
 - **Done** — changes accepted and integrated.
 - **Failed** — ended in an unrecoverable error; can be retried.
 

@@ -111,8 +111,8 @@ it is how an operator gets from one shape to the next.
   the Step, skip it (if allowed), or cancel the Run.
 - If a Gate is never resolved, the Run remains paused and is clearly shown as waiting on a
   human, and can be reassigned or cancelled.
-- If a Harness Step exhausts a subscription quota, the Step parks and the Run waits, matching
-  Task Parked behaviour in [F06](./F06-authentication-billing.md).
+- If a Harness Step stops on what reads as an exhausted quota, the Step parks and the Run waits
+  a fixed five hours, matching Task Parked behaviour in [F06](./F06-authentication-billing.md).
 
 ## Out of scope
 

@@ -71,8 +71,10 @@ requirements but may not relax these.
   concurrency limits and available Executors.
 
 ### Cost control
-- **NFR-10** Subscription-billed Harnesses respect a configurable concurrency cap, and quota
-  exhaustion parks work rather than failing it or silently switching to metered billing.
+- **NFR-10** Subscription-billed Harnesses respect a configurable concurrency cap, and a
+  harness that stops on an exhausted quota parks its work for a fixed five hours rather than
+  failing it or silently switching to metered billing. Quota is not detected and there is no
+  spending limit (Later).
 
 ### Usability
 - **NFR-11** The state of any Task or Run is understandable at a glance without reading raw
