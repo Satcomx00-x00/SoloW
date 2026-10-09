@@ -114,4 +114,33 @@ describe("local executor terminal", () => {
     expect(exited).toBe(0);
     expect(output).toContain("40 132");
   });
+
+  // `setsid -c` is what gives the shell a session; a host without it (macOS) cannot pass this.
+  it.skipIf(!Bun.which("setsid"))(
+    "interrupts the program on ^C, as a terminal window does",
+    async () => {
+      let output = "";
+      const executor = createLocalExecutor(process.cwd());
+      const handle = executor.openTerminal?.(
+        ["/bin/sh", "-c", "trap 'echo interrupted; exit 0' INT; echo ready; sleep 30"],
+        {
+          cwd: process.cwd(),
+          env: { PATH: "/usr/bin:/bin" },
+          cols: 80,
+          rows: 24,
+          onData: (data) => {
+            output += new TextDecoder().decode(data);
+          },
+          onExit: () => {},
+        },
+      );
+      for (let i = 0; i < 100 && !output.includes("ready"); i++) await Bun.sleep(20);
+
+      handle?.write("\x03");
+      const exited = await Promise.race([handle?.exited, Bun.sleep(3_000).then(() => "timed out")]);
+
+      expect(exited).toBe(0);
+      expect(output).toContain("interrupted");
+    },
+  );
 });

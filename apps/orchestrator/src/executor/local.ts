@@ -26,6 +26,39 @@ import type {
  * else reaches the host through the `Executor` it returns.
  */
 /**
+ * The prefix that makes a terminal's program the leader of its own session with the
+ * pseudo-terminal as its controlling terminal — `setsid -c`, where the host has one.
+ *
+ * `Bun.spawn` hands the child the terminal's slave as its stdio but never calls `setsid` and
+ * `TIOCSCTTY` (verified on Bun 1.4.2: `ps` shows no TTY, and `detached: true` does not change it).
+ * Without a controlling terminal the line discipline has nobody to signal: ^C was echoed and no
+ * `SIGINT` was ever sent, so a command run in the Task's shell could not be interrupted, and
+ * neither job control nor a resize reached anything but the direct child.
+ *
+ * `setsid` does not fork here — the spawned child is not a process-group leader — so the pid Bun
+ * tracks is the program's own (checked: same pid, `pts/N`, ^C delivered). util-linux and BusyBox
+ * both spell the option `-c`, and the help text is asked rather than the version, since the
+ * option is what matters. macOS has no `setsid`: there the terminal keeps the old behaviour and
+ * the explicit `SIGWINCH` below, and ^C reaches only programs that read the terminal raw.
+ */
+let controllingTerminalPrefix: string[] | undefined;
+function controllingTerminal(): string[] {
+  if (controllingTerminalPrefix) return controllingTerminalPrefix;
+  const setsid = Bun.which("setsid");
+  let usage = "";
+  if (setsid) {
+    try {
+      const help = Bun.spawnSync([setsid, "--help"]);
+      usage = `${help.stdout.toString()}${help.stderr.toString()}`;
+    } catch {
+      // Present but not runnable: the same as absent.
+    }
+  }
+  controllingTerminalPrefix = setsid && /(^|[\s[])-c\b|--ctty/.test(usage) ? [setsid, "-c"] : [];
+  return controllingTerminalPrefix;
+}
+
+/**
  * Variables that belong to SoloW itself and must not follow a harness into its shell (B5).
  *
  * A local harness runs as the orchestrator's uid, so it can still read whatever files that uid can
@@ -148,7 +181,11 @@ export function createLocalExecutor(root: string): Executor {
         data: (_terminal, data) => opts.onData(data),
       });
       // The bundled harness, as for `spawn`: the terminal may be mounting the Task's own `claude`.
-      const proc = Bun.spawn(withBundledCommand(cmd), { cwd: opts.cwd, env: opts.env, terminal });
+      const proc = Bun.spawn([...controllingTerminal(), ...withBundledCommand(cmd)], {
+        cwd: opts.cwd,
+        env: opts.env,
+        terminal,
+      });
       void proc.exited.then((code) => {
         opts.onExit(code);
         terminal.close();
@@ -162,12 +199,11 @@ export function createLocalExecutor(root: string): Executor {
           terminal.resize(cols, rows);
           /*
            * Told, as well as resized. The kernel signals a resize to the foreground process group
-           * of the terminal's session, and the child is not in one: `Bun.spawn` does not make the
-           * pseudo-terminal its controlling terminal (verified on Bun 1.4.2 — `ps` shows no TTY,
-           * and a `trap … WINCH` never fires). Without this a TUI kept drawing at its first size,
-           * and `docker exec -t` — which forwards a resize only on its own `SIGWINCH` — never
-           * passed one into the container at all (`stty size` there stayed 24×80). Only the
-           * direct child is told; a program the shell started learns the size on its next read.
+           * of the terminal's session, and without `controllingTerminal()` the child has none —
+           * so on a host with no `setsid` a TUI kept drawing at its first size, and `docker exec
+           * -t`, which forwards a resize only on its own `SIGWINCH`, never passed one into the
+           * container (`stty size` there stayed 24×80). Where the session exists the kernel has
+           * already told the foreground job and this second signal is one more redraw.
            */
           proc.kill("SIGWINCH");
         },
