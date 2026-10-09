@@ -17,6 +17,7 @@ import {
   isExecutorUnavailable,
   type ResolveLinks,
 } from "./docker.js";
+import { openOutOfBandExecutor } from "./factory.js";
 import { createLocalExecutor } from "./local.js";
 import type { Executor } from "./types.js";
 
@@ -103,12 +104,89 @@ async function liveHarness() {
 if (LIVE) {
   describeExecutorContract("docker", liveHarness);
   describeMountDifferential();
+  describeOneShot();
 } else {
   describe("Executor contract — docker (live)", () => {
     it.skip("needs a Docker daemon: re-run with SOLOW_TEST_DOCKER=1", () => {});
   });
   describe("Mount differential — docker (live)", () => {
     it.skip("needs a Docker daemon: re-run with SOLOW_TEST_DOCKER=1", () => {});
+  });
+  describe("One-shot beside a Task — docker (live)", () => {
+    it.skip("needs a Docker daemon: re-run with SOLOW_TEST_DOCKER=1", () => {});
+  });
+}
+
+/**
+ * A one-shot container — an Explain, or the setup's test — beside a live Task's (roadmap B4).
+ *
+ * `docker.test.ts` pins the argv that keeps the two apart; this asks the daemon whether it did:
+ * the one-shot is a second container rather than the Task's adopted, it holds only its scratch
+ * directory, and removing it leaves the Task's container running.
+ */
+function describeOneShot(): void {
+  describe("One-shot beside a Task — docker (live)", () => {
+    it("runs as its own container, holds only its scratch directory, and leaves the Task's running", async () => {
+      // `dockerOpts` reads the deployment's settings, which refuse to parse without this.
+      process.env["SOLOW_STREAM_SECRET"] ??= "docker-live-oneshot";
+      const host = createLocalExecutor(process.cwd());
+      const worktreeRoot = await mkdtemp(join(tmpdir(), "gc-docker-oneshot-"));
+      const repoCacheRoot = await mkdtemp(join(tmpdir(), "gc-docker-oneshot-repos-"));
+      const ids: DockerIds = { workspaceId: "ws-live", taskId: "task-oneshot", sessionId: "sess" };
+      const taskRoot = join(worktreeRoot, "task-oneshot");
+      await mkdir(taskRoot, { recursive: true });
+      const taskExecutor = createDockerExecutor(host, CONFIG, ids, {
+        jailRoot: taskRoot,
+        worktreeRoot,
+        user: defaultContainerUser(),
+      });
+      const taskName = containerName(ids, deploymentId(worktreeRoot));
+      const docker = async (...args: string[]) =>
+        (await host.exec(["docker", ...args])).stdout.trim();
+      try {
+        expect((await taskExecutor.exec(["true"])).exitCode).toBe(0);
+
+        const launch = await openOutOfBandExecutor(
+          { config: CONFIG },
+          {
+            workspaceId: ids.workspaceId,
+            taskId: ids.taskId,
+            purpose: "explain",
+            harnessCommands: ["sh"],
+            worktreeRoot,
+            repoCacheRoot,
+            host,
+          },
+        );
+        // Created the way the driver creates it on first use; the preflight is the run's own and
+        // is exercised by `smoke-docker`, against an image that carries the full userland.
+        expect((await launch.executor.exec(["test", "-d", launch.cwd])).exitCode).toBe(0);
+        const oneShots = await docker(
+          "ps",
+          "-q",
+          "--filter",
+          "label=solow.role=oneshot",
+          "--filter",
+          `label=solow.deployment=${deploymentId(worktreeRoot)}`,
+        );
+        expect(oneShots.split("\n").filter(Boolean)).toHaveLength(1);
+        const mounts = JSON.parse(
+          await docker("inspect", "-f", "{{json .Mounts}}", oneShots),
+        ) as Array<{ Type: string; Source: string }>;
+        expect(mounts.filter((m) => m.Type === "bind").map((m) => m.Source)).toEqual([launch.cwd]);
+        // The Task's worktree is not in there, whatever the two containers share in labels.
+        expect((await launch.executor.exec(["test", "-e", taskRoot])).exitCode).not.toBe(0);
+
+        await launch.dispose();
+
+        expect(await docker("ps", "-aq", "--filter", `id=${oneShots}`)).toBe("");
+        expect(await docker("inspect", "-f", "{{.State.Running}}", taskName)).toBe("true");
+      } finally {
+        await taskExecutor.dispose();
+        await rm(worktreeRoot, { recursive: true, force: true });
+        await rm(repoCacheRoot, { recursive: true, force: true });
+      }
+    });
   });
 }
 

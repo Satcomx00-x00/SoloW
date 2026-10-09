@@ -1,9 +1,12 @@
-import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ExecutorConfig } from "@solow/contracts";
 import { type OrchestratorEnv, orchestratorEnv } from "../env.js";
 import {
   type CommandProbes,
+  type ContainerRole,
   createDockerExecutor,
   type DockerIds,
   defaultContainerUser,
@@ -71,6 +74,8 @@ export interface ExecutorFactoryOpts {
    * injectable so the driver can be tested against a fake that only records argv.
    */
   host?: Executor;
+  /** A Task's own container unless stated — see `ContainerRole` and `openOutOfBandExecutor`. */
+  role?: ContainerRole;
 }
 
 export function createExecutorFor(
@@ -201,5 +206,110 @@ export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
     pullTimeoutMs: env.SOLOW_DOCKER_PULL_TIMEOUT_MS,
     ...(opts.harnessCommands ? { harnessCommands: opts.harnessCommands } : {}),
     ...(opts.probedCommands ? { probedCommands: opts.probedCommands } : {}),
+    ...(opts.role ? { role: opts.role } : {}),
+  };
+}
+
+/** A launch that is not a Task's run, and how to end it — see `openOutOfBandExecutor`. */
+export interface OutOfBandExecutor {
+  executor: Executor;
+  /** The scratch directory: the harness's working directory, and a container's only bind mount. */
+  cwd: string;
+  /**
+   * The run's own preflight against this executor — `ok` without asking anything for a local one.
+   * Like the run's, a thrown error is a flake (a pull that timed out) and `ok: false` a verdict;
+   * the caller turns both into an answer.
+   */
+  preflight(): Promise<PreflightResult>;
+  /** Removes the container, if one was made, and the scratch directory. Never rejects. */
+  dispose(): Promise<void>;
+}
+
+export interface OutOfBandOpts {
+  workspaceId: string;
+  /** The Task an Explain is about: a label on the container, nothing more. Null for a probe. */
+  taskId: string | null;
+  /** Which route is asking; names the scratch directory so a leftover says what made it. */
+  purpose: "explain" | "probe";
+  /** What will be spawned, probed by the preflight exactly as a run's harness commands are. */
+  harnessCommands: readonly string[];
+  /** `SOLOW_WORKTREE_ROOT` and `SOLOW_REPO_CACHE_ROOT`, as a run is handed them (unresolved). */
+  worktreeRoot: string;
+  repoCacheRoot: string;
+  /** See `ExecutorFactoryOpts.host`. */
+  host?: Executor;
+}
+
+/**
+ * Somewhere to launch a harness that is not a Task's run: the Brief tab's Explain, the guided
+ * setup's test (roadmap B4).
+ *
+ * Both used to start the harness on the orchestrator's host whatever the Executor Profile said,
+ * so a Workspace whose Tasks ran in a container was explained to — and, worse, *tested* — by a
+ * harness on a machine its Tasks never touch: the setup could pass on a host-installed Claude
+ * while the image had none, or fail on a host without one while the container was fine. This
+ * builds the executor the run would build, through the same `createExecutorFor` and
+ * `probeExecutorFor`, so the image, the limits, the prepare script, the utilities and the harness
+ * binary are the run's, and so is every refusal.
+ *
+ * What it does *not* share with the run is the container. A one-shot (`ContainerRole`) is named
+ * for this request, mounts only the request's own scratch directory — no worktree, no repository,
+ * no transcript store; the profile's own mounts stay, since they are part of the environment the
+ * operator configured for every container of it — and is removed by `dispose()`, which the caller
+ * puts in a `finally`. A running Task's container is never adopted, disturbed or removed by it.
+ *
+ * The scratch directory is under `SOLOW_WORKTREE_ROOT` for a container, not the system temp
+ * directory: it has to pass the mount guard, and the deployment's own root is the one place that
+ * always does — a macOS `$TMPDIR` (`/var/folders/…`) never would. A local launch keeps the temp
+ * directory it always had, since nothing is mounted.
+ *
+ * A null profile is the host: Settings' "Test" asks about a Harness Profile with no executor in
+ * view, and keeps the probe it always had.
+ */
+export async function openOutOfBandExecutor(
+  profile: { config: ExecutorConfig } | null,
+  opts: OutOfBandOpts,
+): Promise<OutOfBandExecutor> {
+  const config = profile?.config ?? { kind: "local" as const };
+  if (config.kind !== "docker") {
+    // Refused before any directory is made, in the factory's own words; the lifecycle's
+    // `hasDriver` gate has the same sentence for a run.
+    if (config.kind !== "local") throw new Error(missingDriverReason(config.kind));
+    const cwd = await mkdtemp(join(tmpdir(), `solow-${opts.purpose}-`));
+    return {
+      executor: createLocalExecutor(cwd),
+      cwd,
+      preflight: async () => ({ ok: true, harnessCommands: [] }),
+      dispose: () => rm(cwd, { recursive: true, force: true }).catch(() => {}),
+    };
+  }
+
+  // Made if absent: the setup's test is routinely the first thing to run on a fresh install,
+  // before any Task has created the root.
+  await mkdir(opts.worktreeRoot, { recursive: true });
+  const cwd = await mkdtemp(join(opts.worktreeRoot, `.solow-${opts.purpose}-`));
+  const factoryOpts: ExecutorFactoryOpts = {
+    // A request id where a run puts its Session's: the one-shot's name and `solow.run` label.
+    ids: { workspaceId: opts.workspaceId, taskId: opts.taskId ?? "", sessionId: randomUUID() },
+    jailRoot: cwd,
+    worktreeRoot: opts.worktreeRoot,
+    repoCacheRoot: opts.repoCacheRoot,
+    harnessCommands: opts.harnessCommands,
+    // One map for both, as `probeExecutorFor` requires.
+    probedCommands: new Map(),
+    role: "oneshot",
+    ...(opts.host ? { host: opts.host } : {}),
+  };
+  const executor = createExecutorFor({ config }, factoryOpts);
+  return {
+    executor,
+    cwd,
+    preflight: () => probeExecutorFor({ config }, factoryOpts),
+    async dispose() {
+      // The container first: it holds the scratch directory as a bind mount, and a harness still
+      // writing into it would race the removal below.
+      await executor.dispose();
+      await rm(cwd, { recursive: true, force: true }).catch(() => {});
+    },
   };
 }
