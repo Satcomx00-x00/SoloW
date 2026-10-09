@@ -351,6 +351,10 @@ startWebSocketServer(PORTS.ws);
 
 Bun.serve({
   port: PORTS.orchestrator,
+  // Loopback, as the WebSocket server beside it: `/events` launches a Task with no signature
+  // to check, and Bun's default of every interface would offer that to the network while the
+  // suite runs.
+  hostname: "127.0.0.1",
   async fetch(req) {
     const { pathname } = new URL(req.url);
     if (pathname === "/health") return new Response("ok");
