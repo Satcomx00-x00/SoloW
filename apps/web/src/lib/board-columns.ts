@@ -9,6 +9,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "./task-states";
+import { effectiveGate, GATE_DESCRIPTION, GATE_NAME } from "./workflow-gates";
 
 /**
  * The board's columns, as data (issue #5 AC-6).
@@ -114,34 +115,30 @@ export function lifecycleColumns(): readonly BoardColumn[] {
  * `STATE_STYLE` pairs every hue with its own glyph is WCAG 1.4.1 — a distinction a colour-blind
  * reader cannot see is not a distinction.
  */
-const GATE_CHROME: Record<WorkflowStepGate, Omit<ColumnChrome, "label">> = {
+const GATE_CHROME: Record<WorkflowStepGate, Omit<ColumnChrome, "label" | "hint">> = {
   human: {
     icon: UserRoundCheck,
     textClassName: STATE_STYLE.review.textClassName,
     barClassName: STATE_STYLE.review.barClassName,
     tintClassName: STATE_STYLE.review.tintClassName,
-    hint: "Advances when you approve the review",
   },
   auto: {
     icon: Zap,
     textClassName: "text-muted-foreground",
     barClassName: "bg-muted-foreground/40",
     tintClassName: "bg-transparent",
-    hint: "Advances on its own — the work still needs your approval before anything is integrated",
   },
   "auto-unless-changes": {
     icon: ShieldCheck,
     textClassName: "text-muted-foreground",
     barClassName: "bg-muted-foreground/40",
     tintClassName: "bg-transparent",
-    hint: "Advances on its own unless the run produced changes, which need your approval",
   },
   "agent-decides": {
     icon: BotMessageSquare,
     textClassName: "text-muted-foreground",
     barClassName: "bg-muted-foreground/40",
     tintClassName: "bg-transparent",
-    hint: "Advances on its own unless the harness asks for a review (REVIEW: yes) or asked you decisions",
   },
 };
 
@@ -163,14 +160,16 @@ export function workflowColumns(steps: readonly WorkflowStepDto[]): readonly Boa
   const done = STATE_STYLE.done;
   return [
     ...ordered.map((step, index): BoardColumn => {
-      const chrome = GATE_CHROME[step.gate];
+      // What the Step does, not what its gate field says: one finished by a review waits for it.
+      const gate = effectiveGate(step);
+      const chrome = GATE_CHROME[gate];
       return {
         kind: "step",
         id: `step:${step.id}`,
         stepId: step.id,
         workflowId: step.workflowId,
         position: index + 1,
-        gate: step.gate,
+        gate,
         // The place in the pipeline rides in the label because the column head has exactly one
         // glyph slot and the gate has the better claim on it: an operator scanning the board is
         // looking for where a human is needed, and the columns are already left-to-right.
@@ -179,7 +178,9 @@ export function workflowColumns(steps: readonly WorkflowStepDto[]): readonly Boa
         textClassName: chrome.textClassName,
         barClassName: chrome.barClassName,
         tintClassName: chrome.tintClassName,
-        hint: chrome.hint,
+        // Whatever the gate, the last approval is still a person's: nothing is integrated
+        // without one, which an "it moves on" hint must not seem to deny.
+        hint: `${GATE_NAME[gate]}: ${GATE_DESCRIPTION[gate]}${gate === "human" ? "" : " Nothing is integrated until you approve."}`,
         droppable: false,
       };
     }),
