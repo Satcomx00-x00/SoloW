@@ -452,6 +452,12 @@ two Repositories and compares the real mount sets in both directions, and
 - **Published ports and preview URLs.** Docker fixes port publishing at container creation while
   `forward()` is handed a port at call time; reconciling those is #35's problem.
 - **Rootless and remote daemons.** Both work through the same CLI today and neither is tested here.
+- **Publishing the executor image** (added 2026-10-10, roadmap B4). SoloW's own image
+  (`docker/executor/Dockerfile`) is built on each machine — by the guided setup's button, which
+  runs the build through this driver's host (`executor/image-build.ts`), or by
+  `solow executor-image` — and is not pushed to any registry. It carries Claude Code, whose package
+  reserves all rights to Anthropic; to our understanding nothing grants redistributing it, so a
+  public image would. Revisit only with a grant that says otherwise. See F07, "The executor image".
 
 ## Review (2026-10-09)
 

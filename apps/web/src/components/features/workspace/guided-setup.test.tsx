@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 import { afterEach, describe, expect, it } from "bun:test";
-import type { WorkspaceSetupDto } from "@solow/contracts";
+import type { ExecutorImageBuildStatus, WorkspaceSetupDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { GuidedSetup } from "./guided-setup";
@@ -67,6 +67,16 @@ const dockerWithImage = (present: boolean) => () => ({
   reason: null,
   executorImage: { name: IMAGE, present },
 });
+/** Where the orchestrator's build of that image is (roadmap B4). */
+const imageBuild = (over: Partial<ExecutorImageBuildStatus> = {}): ExecutorImageBuildStatus => ({
+  image: IMAGE,
+  state: "idle",
+  startedAt: null,
+  finishedAt: null,
+  output: [],
+  reason: null,
+  ...over,
+});
 
 describe("GuidedSetup", () => {
   it("opens on Connect Claude and asks only how you pay and the token", async () => {
@@ -89,15 +99,102 @@ describe("GuidedSetup", () => {
     renderWithTrpc(<GuidedSetup />, {
       "workspace.setup": () => bare(),
       "profile.executor.dockerAvailability": dockerWithImage(false),
+      "profile.executor.imageBuild": () => imageBuild(),
     });
 
     expect(
       await screen.findByText("It works with your access, without asking first"),
     ).toBeDefined();
-    // Docker is there but the image with Claude Code in it is not: say how to build it.
+    // Docker is there but the image with Claude Code in it is not: offer to build it, here, with
+    // the commands beside the button for whoever would rather use a terminal.
     expect(await screen.findByText(/Docker is installed here/)).toBeDefined();
+    expect(
+      await screen.findByRole("button", { name: "Build the isolated environment" }),
+    ).toBeDefined();
     expect(screen.getByText("npx @satcomx00-x00/solow executor-image")).toBeDefined();
     expect(screen.getByText("make executor-image")).toBeDefined();
+  });
+
+  it("builds the image from the setup, shows it running, and then plans the container", async () => {
+    let present = false;
+    let state: ExecutorImageBuildStatus = imageBuild();
+    const started: unknown[] = [];
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => bare(),
+      "profile.executor.dockerAvailability": () => dockerWithImage(present)(),
+      "profile.executor.imageBuild": () => state,
+      "profile.executor.buildImage": () => {
+        started.push(true);
+        state = imageBuild({
+          state: "building",
+          startedAt: new Date().toISOString(),
+          output: ["#5 [harnesses 2/2] RUN npm install --global"],
+        });
+        return state;
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Build the isolated environment" }));
+
+    // Running: said once in the live region, with Docker's newest line beside it.
+    expect(
+      await screen.findByText("Building the image on this machine. It takes a few minutes."),
+    ).toBeDefined();
+    expect(screen.getByText("#5 [harnesses 2/2] RUN npm install --global")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Building…" })).toHaveProperty("disabled", true);
+    expect(started).toHaveLength(1);
+
+    // The next poll finds it built; the availability check is asked again, and the plan moves.
+    present = true;
+    state = imageBuild({
+      state: "succeeded",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    });
+    expect(
+      await screen.findByText(/in an isolated container on this machine/, {}, { timeout: 5_000 }),
+    ).toBeDefined();
+    expect(screen.queryByText("It works with your access, without asking first")).toBeNull();
+  });
+
+  it("says why a build failed, shows what Docker printed, and offers it again", async () => {
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => bare(),
+      "profile.executor.dockerAvailability": dockerWithImage(false),
+      "profile.executor.imageBuild": () =>
+        imageBuild({
+          state: "failed",
+          startedAt: "2026-10-09T12:00:00.000Z",
+          finishedAt: "2026-10-09T12:01:00.000Z",
+          output: ["ERROR: failed to resolve source metadata: dial tcp: i/o timeout"],
+          reason: "The build couldn't download what it needs.",
+        }),
+    });
+
+    expect(await screen.findByText("The build couldn't download what it needs.")).toBeDefined();
+    expect(screen.getByText("What Docker printed")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeDefined();
+    expect(screen.getByText("npx @satcomx00-x00/solow executor-image")).toBeDefined();
+  });
+
+  it("does not claim a build it did not watch, and says so when nothing could start one", async () => {
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => bare(),
+      "profile.executor.dockerAvailability": dockerWithImage(false),
+      // Built at some point, but the image is not here now: offer to build it again.
+      "profile.executor.imageBuild": () =>
+        imageBuild({
+          state: "succeeded",
+          startedAt: "2026-10-01T12:00:00.000Z",
+          finishedAt: "2026-10-01T12:05:00.000Z",
+        }),
+      "profile.executor.buildImage": () => null,
+    });
+
+    const button = await screen.findByRole("button", { name: "Build the isolated environment" });
+    expect(screen.queryByText("The image is built.")).toBeNull();
+    fireEvent.click(button);
+    expect(await screen.findByText(/SoloW's agent runner did not answer/)).toBeDefined();
   });
 
   it("says Claude will work in the isolated container once its image is built", async () => {
@@ -225,6 +322,7 @@ describe("GuidedSetup", () => {
     renderWithTrpc(<GuidedSetup />, {
       "workspace.setup": () => connected({ executorKind: "docker" }),
       "profile.executor.dockerAvailability": dockerWithImage(true),
+      "profile.executor.imageBuild": () => imageBuild(),
       "setup.test": () => ({
         ok: false,
         problem,
@@ -239,6 +337,8 @@ describe("GuidedSetup", () => {
       await screen.findByText(/Claude Code isn't in the container image Claude runs in/),
     ).toBeDefined();
     expect(screen.queryByText(/npm install -g/)).toBeNull();
+    // Rebuilt from here, not from a terminal.
+    expect(await screen.findByRole("button", { name: "Rebuild the image" })).toBeDefined();
 
     problem = "executor";
     fireEvent.click(screen.getByRole("button", { name: "Run the test again" }));

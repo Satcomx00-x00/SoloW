@@ -94,7 +94,12 @@ work share one mental model.
   the setup put Claude in a container, the test runs in a throwaway container of the same image
   after the same preflight a Task gets ([F07](./F07-execution-environments.md#launches-that-are-not-a-tasks-run-roadmap-b4)),
   so a missing Docker daemon or image reads as "SoloW couldn't start the isolated container", and
-  Claude missing from the image is not reported as Claude missing from the machine.
+  Claude missing from the image is not reported as Claude missing from the machine. Both offer to
+  rebuild the image in place.
+- When Docker is installed but the executor image is not built, the setup builds it in one click
+  ("Build the isolated environment"), shows its progress, and says why in plain words if it fails,
+  with the terminal command beside it as the fallback — the newcomer does not leave the browser
+  ([F07](./F07-execution-environments.md#the-executor-image)).
 
 ## Out of scope
 

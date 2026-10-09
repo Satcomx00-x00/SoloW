@@ -131,14 +131,16 @@ Details: [Backup and Restore](https://github.com/Satcomx00-x00/SoloW/blob/main/d
 ## Running agents in an isolated container
 
 Without it, an agent runs as you, on this machine, and can read, change or send anything you can.
-If Docker is installed, build the container image once:
+If Docker is installed, the guided setup offers to build the container image for you, in one
+click; or build it once in a terminal:
 
 ```
 npx @satcomx00-x00/solow executor-image
 ```
 
 It builds `solow-executor:local` with Claude Code and opencode inside, then checks that both run
-as your user. From then on the guided setup's "Connect Claude" runs Claude in a container that
+as your user. The image is built on your machine rather than downloaded: it contains Claude Code,
+which, as we read its license, is not ours to redistribute. From then on the guided setup's "Connect Claude" runs Claude in a container that
 sees only the repository it works on (connect again if you already had). The image holds no
 credentials; the one a task needs is handed in when it runs. Details:
 [Execution Environments](https://github.com/Satcomx00-x00/SoloW/blob/main/docs/features/F07-execution-environments.md#the-executor-image).

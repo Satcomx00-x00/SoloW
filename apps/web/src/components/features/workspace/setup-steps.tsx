@@ -15,7 +15,7 @@ import {
 } from "@solow/contracts";
 import { CircleCheck, CircleX } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { HostRunWarning } from "@/components/features/host-run-warning";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -102,13 +102,134 @@ function ErrorLine({ children }: { children: ReactNode }) {
 }
 
 /**
- * The two commands that build SoloW's executor image — said where Claude would work and again
- * when the test finds the image unusable, so the two cannot drift apart.
+ * The two commands that build SoloW's executor image by hand — the fallback beside the setup's own
+ * build, for when it cannot be asked or keeps failing in a way a terminal shows better.
  */
 const BUILD_IMAGE = {
   npx: "npx @satcomx00-x00/solow executor-image",
   make: "make executor-image",
 } as const;
+
+/** How often a running build is asked about: often enough to feel live, rarely enough to be free. */
+const IMAGE_BUILD_POLL_MS = 2_000;
+
+/** "4:07" — how long the build has been running, from the orchestrator's own start time. */
+function elapsedSince(startedAt: string | null, now: number): string {
+  const seconds = startedAt ? Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000)) : 0;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Build SoloW's executor image from here (roadmap B4), so isolation by default does not stop at a
+ * command a newcomer has to go and type somewhere else.
+ *
+ * The orchestrator runs the build and holds where it is, so this only asks: every two seconds
+ * while one runs, never otherwise, and a reload mid-build picks the running one up again. When it
+ * succeeds the availability check is asked again, and that is what moves the setup's plan to the
+ * container — this component never decides where Claude works.
+ *
+ * Announced once per state, not per line: the live region says "building", "built" or the failure,
+ * while the elapsed time and Docker's newest line sit beside it unannounced, since a screen reader
+ * reading out a build log every two seconds helps nobody.
+ */
+function BuildExecutorImage({ rebuild = false }: { rebuild?: boolean }) {
+  const utils = trpc.useUtils();
+  const status = trpc.profile.executor.imageBuild.useQuery(undefined, {
+    refetchInterval: (query) =>
+      query.state.data?.state === "building" ? IMAGE_BUILD_POLL_MS : false,
+  });
+  const build = trpc.profile.executor.buildImage.useMutation({
+    onSuccess: (next) => {
+      if (next) utils.profile.executor.imageBuild.setData(undefined, next);
+    },
+  });
+  const current = status.data ?? null;
+  const building = current?.state === "building";
+  // A success is this screen's to report only if it watched the build run. One the orchestrator
+  // remembers from earlier says nothing about now — the image may have been removed since, and
+  // claiming it built would take away the button that builds it again.
+  const [watched, setWatched] = useState(false);
+  if (building && !watched) setWatched(true);
+  const builtAt = current?.state === "succeeded" && watched ? current.finishedAt : null;
+
+  useEffect(() => {
+    if (builtAt) void utils.profile.executor.dockerAvailability.invalidate();
+  }, [builtAt, utils]);
+
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!building) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(tick);
+  }, [building]);
+
+  const failed = current?.state === "failed" ? current : null;
+  // The mutation answered, but with nothing: the orchestrator could not be asked to start.
+  const unanswered = build.isSuccess && build.data === null;
+
+  return (
+    <div className="space-y-2">
+      <p aria-live="polite" className="text-sm" role="status">
+        {building
+          ? "Building the image on this machine. It takes a few minutes."
+          : builtAt
+            ? "The image is built."
+            : ""}
+      </p>
+      {building && (
+        <p className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-xs">
+          <span className="shrink-0 tabular-nums">{elapsedSince(current.startedAt, now)}</span>
+          <span className="truncate font-mono">{current.output.at(-1) ?? "Starting…"}</span>
+        </p>
+      )}
+      {failed && (
+        <div className="space-y-2">
+          <ErrorLine>{failed.reason ?? "The image didn't build."}</ErrorLine>
+          {failed.output.length > 0 && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">
+                What Docker printed
+              </summary>
+              <pre className="mt-2 max-h-48 overflow-auto rounded-md border bg-muted/40 p-2 font-mono leading-relaxed">
+                {failed.output.join("\n")}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+      {(unanswered || build.error) && (
+        <ErrorLine>
+          SoloW's agent runner did not answer, so nothing was built. Make sure SoloW is fully
+          started, then try again.
+        </ErrorLine>
+      )}
+      {!builtAt && (
+        <Button
+          loading={building || build.isPending}
+          onClick={() => build.mutate()}
+          size="sm"
+          type="button"
+          variant={failed ? "outline" : "default"}
+        >
+          {building
+            ? "Building…"
+            : failed
+              ? "Try again"
+              : rebuild
+                ? "Rebuild the image"
+                : "Build the isolated environment"}
+        </Button>
+      )}
+      {!building && !builtAt && (
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          Or in a terminal on this machine: <code className="font-mono">{BUILD_IMAGE.npx}</code> (or{" "}
+          <code className="font-mono">{BUILD_IMAGE.make}</code> in a SoloW checkout).
+        </p>
+      )}
+    </div>
+  );
+}
 
 const BILLING_OPTIONS = [
   {
@@ -153,6 +274,8 @@ function WhereItRuns({ setup }: { setup: WorkspaceSetupDto }) {
         Claude will work in an isolated container on this machine, from the{" "}
         <code className="font-mono">{plan.image}</code> image. It works on its own copy of the
         repository and cannot see the rest of your files.
+        {/* The setup's own local fallback moves only when Connect is pressed again. */}
+        {setup.executorKind !== null && " Connect again to move Claude there."}
       </p>
     );
   }
@@ -185,13 +308,14 @@ function WhereItRuns({ setup }: { setup: WorkspaceSetupDto }) {
       {docker.data?.available &&
         // The setup would move Claude into the container by itself, once the image exists.
         (setup.executorKind === null || setup.executorReplaceable ? (
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Docker is installed here, so Claude can work in an isolated container instead. Build its
-            image once, in a terminal on this machine, with{" "}
-            <code className="font-mono">{BUILD_IMAGE.npx}</code> (or{" "}
-            <code className="font-mono">{BUILD_IMAGE.make}</code> in a SoloW checkout), then connect
-            {setup.executorKind === null ? "" : " again"}.
-          </p>
+          <div className="space-y-2">
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Docker is installed here, so Claude can work in an isolated container instead. Its
+              image is built once, on this machine, and takes a few minutes
+              {setup.executorKind === null ? "" : "; then connect again to move Claude into it"}.
+            </p>
+            <BuildExecutorImage />
+          </div>
         ) : (
           <p className="text-muted-foreground text-xs leading-relaxed">
             Docker is installed here, so Claude could work in an isolated container instead.{" "}
@@ -423,12 +547,12 @@ const PROBLEM: Record<
     "SoloW's agent runner did not answer, so nothing was tested. Make sure SoloW is fully started, then run the test again.",
   "not-installed": (harness, _credential, inContainer) =>
     inContainer
-      ? `${harness} isn't in the container image Claude runs in. If it is SoloW's image, rebuild it with ${BUILD_IMAGE.npx} (or ${BUILD_IMAGE.make} in a SoloW checkout), then run the test again.`
+      ? `${harness} isn't in the container image Claude runs in. If it is SoloW's image, rebuild it below, then run the test again.`
       : harness === "Claude Code"
         ? "Claude Code isn't installed on the machine running SoloW. Install it (npm install -g @anthropic-ai/claude-code), then run the test again."
         : `${harness} isn't installed on the machine running SoloW. Install it, then run the test again.`,
   executor: () =>
-    `SoloW couldn't start the isolated container Claude runs in. Check that Docker is running and that the image is built — ${BUILD_IMAGE.npx}, or ${BUILD_IMAGE.make} in a SoloW checkout — then run the test again.`,
+    "SoloW couldn't start the isolated container Claude runs in. Check that Docker is running and that its image is built (below), then run the test again.",
   credential: (_harness, credential) =>
     `Claude didn't accept your ${credential}. Go back to Connect Claude and paste a fresh one.`,
   quota: () =>
@@ -487,27 +611,35 @@ export function TestStep({
             : `${result.harness ?? "The agent"} started and answered. It can't be sent a test prompt outside a task, so its first task is the full test.`}
         </p>
       ) : result ? (
-        <div className="space-y-2" role="alert">
-          <p className="flex items-start gap-2 text-sm">
-            <CircleX aria-hidden className="mt-0.5 size-4 shrink-0 text-state-failed" />
-            {result.problem
-              ? PROBLEM[result.problem](
-                  result.harness ?? "Claude Code",
-                  credential,
-                  setup.executorKind === "docker",
-                )
-              : "The test did not pass. Run it again."}
-          </p>
-          {result.fixStep && (
-            <Button
-              onClick={() => onGoTo(result.fixStep ?? "claude")}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Go to Connect Claude
-            </Button>
-          )}
+        <div className="space-y-2">
+          <div className="space-y-2" role="alert">
+            <p className="flex items-start gap-2 text-sm">
+              <CircleX aria-hidden className="mt-0.5 size-4 shrink-0 text-state-failed" />
+              {result.problem
+                ? PROBLEM[result.problem](
+                    result.harness ?? "Claude Code",
+                    credential,
+                    setup.executorKind === "docker",
+                  )
+                : "The test did not pass. Run it again."}
+            </p>
+            {result.fixStep && (
+              <Button
+                onClick={() => onGoTo(result.fixStep ?? "claude")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Go to Connect Claude
+              </Button>
+            )}
+          </div>
+          {/* Both are about the image the container runs, which can be rebuilt from here — outside
+              the alert, whose every change would otherwise be read out again as the build runs. */}
+          {setup.executorKind === "docker" &&
+            (result.problem === "executor" || result.problem === "not-installed") && (
+              <BuildExecutorImage rebuild />
+            )}
         </div>
       ) : (
         step?.done && (

@@ -393,7 +393,7 @@ function sha256(input: string): string {
  * therefore private-registry authentication — `dockerConfig` has no registry-credential field,
  * and that gap is worth stating here rather than papering over.
  */
-function dockerCliEnv(): Record<string, string> {
+export function dockerCliEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of [
     "PATH",

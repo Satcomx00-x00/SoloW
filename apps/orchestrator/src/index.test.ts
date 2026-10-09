@@ -24,10 +24,12 @@ import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import { CONTAINER_HOME, containerName, deploymentId, SPAWN_SHIM } from "./executor/docker.js";
 import { openOutOfBandExecutor } from "./executor/factory.js";
+import type { ExecutorImageBuilder } from "./executor/image-build.js";
 import { createLocalExecutor } from "./executor/local.js";
 import type { ExecResult, Executor, ProcessHandle } from "./executor/types.js";
 import {
   handleAnnouncePost,
+  handleExecutorImagePost,
   handleExplainPost,
   handleProbePost,
   type OutOfBandLaunch,
@@ -108,6 +110,76 @@ describe("handleAnnouncePost", () => {
  * an Owner named, with that Owner's credential in its environment. An unauthenticated version
  * would be remote command execution with a wallet attached.
  */
+/**
+ * `POST /executor-image` and `/executor-image/build` — the guided setup's one-click build of the
+ * executor image (roadmap B4). Signed, because a start spends this host's disk and network; and
+ * the start answers at once, because the build it starts takes minutes.
+ */
+describe("handleExecutorImagePost", () => {
+  const SECRET = "image-secret";
+  const NOW = 1_700_000_000_000;
+
+  /** A builder that only counts: what it does is `image-build.test.ts`'s business. */
+  function countingBuilder() {
+    const calls = { start: 0, status: 0 };
+    const idle = {
+      image: "solow-executor:local",
+      state: "idle" as const,
+      startedAt: null,
+      finishedAt: null,
+      output: [],
+      reason: null,
+    };
+    const imageBuild: ExecutorImageBuilder = {
+      start: () => {
+        calls.start++;
+        return { ...idle, state: "building", startedAt: new Date(NOW).toISOString() };
+      },
+      status: () => {
+        calls.status++;
+        return idle;
+      },
+    };
+    return { imageBuild, calls };
+  }
+
+  const post = (body: unknown, action: "status" | "start", imageBuild: ExecutorImageBuilder) =>
+    handleExecutorImagePost(
+      new Request("http://orchestrator/executor-image", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      { now: () => NOW, streamSecret: SECRET, imageBuild },
+      action,
+    );
+
+  const ticket = signStreamTicket({ workspaceId: "ws-1", taskId: null }, SECRET, NOW);
+
+  it("answers where the build is, and starts nothing to do it", async () => {
+    const { imageBuild, calls } = countingBuilder();
+    const res = await post({ ticket }, "status", imageBuild);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { state: string }).state).toBe("idle");
+    expect(calls).toEqual({ start: 0, status: 1 });
+  });
+
+  it("starts a build and answers with it, without waiting for it", async () => {
+    const { imageBuild, calls } = countingBuilder();
+    const res = await post({ ticket }, "start", imageBuild);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { state: string }).state).toBe("building");
+    expect(calls.start).toBe(1);
+  });
+
+  it("starts nothing for a ticket it cannot verify, or a body without one", async () => {
+    const { imageBuild, calls } = countingBuilder();
+    const forged = signStreamTicket({ workspaceId: "ws-1", taskId: null }, "other-secret", NOW);
+    expect((await post({ ticket: forged }, "start", imageBuild)).status).toBe(401);
+    expect((await post({}, "start", imageBuild)).status).toBe(400);
+    expect(calls.start).toBe(0);
+  });
+});
+
 describe("handleProbePost", () => {
   const SECRET = "probe-secret";
   const NOW = 1_700_000_000_000;
