@@ -108,6 +108,7 @@ function usage() {
     npx solow [options]
     npx solow backup  [--out <dir>] [--no-engine] [--data-dir <path>]
     npx solow restore [<backup>] [--data-dir <path>]   (lists backups without <backup>)
+    npx solow executor-image [--tag <name>]            (needs Docker; see below)
 
   Options
     -p, --port <n>        Port for the web UI          (default ${DEFAULTS.web})
@@ -134,6 +135,10 @@ function usage() {
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
   Before an upgrade changes the database, a copy of it and its keys is kept in
   <data-dir>/backups. \`backup\` works while SoloW runs; \`restore\` needs it stopped.
+
+  \`executor-image\` builds ${DEFAULT_EXECUTOR_IMAGE} (or $SOLOW_EXECUTOR_IMAGE), the image with
+  Claude Code and opencode in it. Once it exists, the guided setup runs Claude in an isolated
+  container on this machine instead of directly as you.
 `);
 }
 
@@ -776,12 +781,104 @@ function runBackupCommand(command, rest) {
   process.exit(result.status ?? 1);
 }
 
+/**
+ * The tag the guided setup looks for — `DEFAULT_EXECUTOR_IMAGE` in `@solow/contracts`, which this
+ * file cannot import, so `launcher-executor-image.test.ts` keeps the two spellings in step.
+ */
+const DEFAULT_EXECUTOR_IMAGE = "solow-executor:local";
+
+/** The package's copy (`scripts/build.ts` puts it in dist/), or the checkout's when run from source. */
+function executorDockerfile() {
+  const candidates = [
+    join(DIST, "executor", "Dockerfile"),
+    join(HERE, "..", "..", "..", "docker", "executor", "Dockerfile"),
+  ];
+  const found = candidates.find((path) => existsSync(path));
+  if (!found) fail(`the executor image's Dockerfile is missing (looked in ${candidates[0]})`);
+  return found;
+}
+
+/**
+ * `solow executor-image`: build the image the Docker executor runs Claude Code and opencode in
+ * (roadmap B4), so the guided setup can put Claude in a container instead of on this machine.
+ *
+ * Here rather than only in the repo's Makefile because the person who needs it most installed
+ * SoloW with npx and has no checkout. The same code serves both: `make executor-image` runs this.
+ * The Dockerfile goes in on stdin with no build context, so nothing from the machine can be copied
+ * into a layer. `SOLOW_EXECUTOR_IMAGE` and `SOLOW_DOCKER_BIN` are the orchestrator's own settings,
+ * read here too, so the tag built is the one the setup asks the daemon for.
+ */
+function runExecutorImageCommand(rest) {
+  let tag = process.env.SOLOW_EXECUTOR_IMAGE || DEFAULT_EXECUTOR_IMAGE;
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === "--tag" && rest[i + 1]) tag = rest[++i];
+    else
+      fail(
+        `unknown option for executor-image: ${rest[i]}\nUsage: solow executor-image [--tag <name>]`,
+      );
+  }
+  const docker = process.env.SOLOW_DOCKER_BIN || "docker";
+
+  console.log(`solow: building ${tag} — Claude Code and opencode, for the Docker executor`);
+  const built = spawnSync(docker, ["build", "--tag", tag, "-"], {
+    input: readFileSync(executorDockerfile()),
+    stdio: ["pipe", "inherit", "inherit"],
+  });
+  if (built.error) {
+    fail(
+      `could not run \`${docker}\` (${built.error.message}).\n` +
+        "  The isolated executor needs Docker on this machine: install it, start it, and re-run.",
+    );
+  }
+  if (built.status !== 0) fail("the image did not build — see the output above.");
+
+  /*
+   * Proved the way a Task will use it, not only built: as this user's uid, with `HOME` a tmpfs —
+   * the two things the driver always imposes (`runArgs` in `executor/docker.ts`). An image whose
+   * harnesses only run as the uid it was built for would pass a plain `docker run` and then fail
+   * every Task, so the check is worth the second it costs.
+   */
+  // `SOLOW_DOCKER_USER` first, as the orchestrator reads it: the uid a Task will actually get.
+  const runAs =
+    process.env.SOLOW_DOCKER_USER || (process.getuid && `${process.getuid()}:${process.getgid()}`);
+  const [uid, gid] = runAs ? runAs.split(":") : [];
+  const user = runAs ? ["--user", runAs] : [];
+  const owner = runAs ? `,uid=${uid},gid=${gid}` : "";
+  const checked = spawnSync(
+    docker,
+    [
+      "run",
+      "--rm",
+      ...user,
+      "--tmpfs",
+      `/home/solow:rw,exec,mode=0700${owner},size=64m`,
+      "--env",
+      "HOME=/home/solow",
+      "--entrypoint",
+      "/bin/sh",
+      tag,
+      "-c",
+      "claude --version && opencode --version",
+    ],
+    { stdio: "inherit" },
+  );
+  if (checked.status !== 0) {
+    fail(`${tag} was built, but its harnesses did not run as this user — see the output above.`);
+  }
+  console.log(
+    `\n  ${tag} is ready. Connect Claude in SoloW's setup (again, if you already did) and new` +
+      "\n  Tasks run in an isolated container on this machine.\n",
+  );
+  process.exit(0);
+}
+
 async function main() {
   // Before anything is created, and inherited by every service: the database's -wal and -shm, the
   // engine's files and the backups are written by them, long after this file stopped writing.
   process.umask(0o077);
   const [command, ...rest] = process.argv.slice(2);
   if (command === "backup" || command === "restore") runBackupCommand(command, rest);
+  if (command === "executor-image") runExecutorImageCommand(rest);
   const opts = parseArgs(process.argv.slice(2));
   const bun = resolveBun();
 

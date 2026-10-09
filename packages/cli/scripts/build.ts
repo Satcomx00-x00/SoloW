@@ -172,6 +172,11 @@ console.log("\n[4/4] migrations");
 // load-bearing: dist/db/migrate.js alongside dist/migrations/.
 await cp(join(ROOT, "packages", "db", "migrations"), join(DIST, "migrations"), { recursive: true });
 
+// `solow executor-image` builds from this copy: someone who installed with npx has no checkout to
+// build the isolated executor's image from.
+await mkdir(join(DIST, "executor"), { recursive: true });
+await cp(join(ROOT, "docker", "executor", "Dockerfile"), join(DIST, "executor", "Dockerfile"));
+
 /*
  * The tarball has to be able to *resolve* what it ships, not merely contain it.
  *
