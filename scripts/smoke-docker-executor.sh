@@ -717,6 +717,14 @@ check_reason usable "$NO_DOCKER" no
 check_reason usable "$NO_DAEMON" no
 check_reason usable "could not obtain image" no
 check_reason usable "exited immediately" no
+# Except SoloW's own executor image (`docker/executor/Dockerfile`, known by the title it labels
+# itself with), which exists to pass: a preflight that refused it would refuse every isolated Task.
+TITLE="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.title"}}' "$IMAGE" 2> /dev/null || true)"
+if [ "$TITLE" = "solow-executor" ] && [ "$(cat "$WORK/pf-usable.verdict")" != "ok" ]; then
+    echo "smoke-docker-executor: the preflight refused SoloW's own executor image:" >&2
+    sed 's/^/    /' "$WORK/pf-usable.reason" >&2
+    exit 1
+fi
 
 # And the daemon's own half of it: a preflight that has returned a verdict must not have left a
 # container behind at all. Nothing else this run created survives at this point, so this census is

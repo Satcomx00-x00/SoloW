@@ -1216,9 +1216,10 @@ export async function runPrepareScript(
  * `base64` passes it cleanly. The loop asks about each one separately and prints the ones that
  * are absent, which is the answer the caller needs to name them.
  *
- * Present means a file on `PATH`, not anything `command -v` answers for. These are exec'd by
- * `docker exec`, which never sees a shell's builtins: `command -v kill` prints `kill` in an image
- * with no kill binary, and the probe passed an image that could not stop its harness.
+ * Present means an executable file in a `PATH` directory, which is what `docker exec` looks for.
+ * `command -v` cannot say so: dash and busybox answer `kill` for their builtin whether or not the
+ * binary exists, so it passed an image that could not stop its harness — and a check on its
+ * answer being a path fails every image instead.
  */
 export async function probeCommands(
   host: Executor,
@@ -1235,7 +1236,7 @@ export async function probeCommands(
     name,
     "sh",
     "-c",
-    'for c in "$@"; do case "$(command -v "$c" 2>/dev/null)" in /*) ;; *) echo "$c" ;; esac; done',
+    'for c in "$@"; do f=; IFS=:; for d in $PATH; do [ -f "$d/$c" ] && [ -x "$d/$c" ] && f=1 && break; done; unset IFS; [ -n "$f" ] || echo "$c"; done',
     "sh",
     ...commands,
   ]);
