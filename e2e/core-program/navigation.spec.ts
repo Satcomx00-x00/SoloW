@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { trpc, warmRoutes } from "../support/flows.js";
+import { NO_SUCH_ID, trpc, warmRoutes } from "../support/flows.js";
 
 /**
  * Navigation smoke (Decision 0029): the sidebar, the breadcrumb, the command palette and the
@@ -34,12 +34,35 @@ async function dropProjects(page: Page, ids: readonly string[]): Promise<void> {
 }
 
 test.describe("navigation", () => {
+  // The walks click through pages a dev server compiles on first visit. Warmed inside a test, the
+  // compiles still ate its three minutes on a loaded host and the walk timed out on its second
+  // click; on this hook's clock they cost the walks nothing. A Project's routes are dynamic, and
+  // compiling one for an id nothing has compiles it for every id.
+  test.beforeAll(async ({ browser }, testInfo) => {
+    const routes = [
+      "/projects",
+      "/unassigned",
+      "/workflows",
+      "/history",
+      "/settings",
+      `/projects/${NO_SUCH_ID}`,
+      `/projects/${NO_SUCH_ID}/board`,
+      `/projects/${NO_SUCH_ID}/issues`,
+    ];
+    // A minute a route: measured at 20–40 s each at a load average of 9, and five minutes for
+    // all eight ran out the one time a rebuild landed mid-warm.
+    testInfo.setTimeout(routes.length * 60_000);
+    // A hook's page does not get the config's `use`, so the base URL is passed on by hand.
+    const { baseURL } = testInfo.project.use;
+    const page = await browser.newPage(baseURL ? { baseURL } : {});
+    await warmRoutes(page, routes);
+    await page.close();
+  });
+
   test("every workspace page is one click from every other, and Settings leads back", async ({
     page,
   }) => {
     const errors = failOnPageErrors(page);
-    // The walk's first click on a cold page waited past its 30 s on a loaded runner.
-    await warmRoutes(page, ["/unassigned", "/workflows", "/history", "/settings"]);
     await page.goto("/projects");
     await expect(sidebar(page)).toBeVisible();
 
