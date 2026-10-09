@@ -19,20 +19,76 @@ export const dockerAvailabilityRequest = z.object({ ticket: z.string().min(1) })
 export type DockerAvailabilityRequest = z.infer<typeof dockerAvailabilityRequest>;
 
 /**
+ * The image the guided setup runs Claude in, unless the operator names another with
+ * `SOLOW_EXECUTOR_IMAGE` on the orchestrator. Built from `docker/executor/Dockerfile` by
+ * `make executor-image` or `solow executor-image`, which tag it with this name.
+ *
+ * A local tag, not a registry one: nothing pulls it, so a fresh machine has it only once someone
+ * built it there — which is why the setup asks the daemon whether it exists before choosing it.
+ * `packages/cli/bin/solow.mjs` cannot import this file and spells the same name; a test there
+ * keeps the two in step.
+ */
+export const DEFAULT_EXECUTOR_IMAGE = "solow-executor:local";
+
+/**
  * Whether the orchestrator can reach a Docker daemon. `available: false` is a finished answer, not
  * an error: it carries the reason so the Executors page can say why the default is Local.
  * `null` on the web side means "could not ask" (orchestrator not wired or down), which must not be
  * read as "no Docker".
+ *
+ * `executorImage` is the image a container needs a harness in, and whether the daemon already has
+ * it. Only a local copy counts: the preflight would pull a missing one, but a local tag cannot be
+ * pulled, and a setup that chose a container on the strength of a pull that will fail would trade
+ * the host-run warning for a Task that never starts. `present` is false whenever Docker is not
+ * available, since nothing could be asked.
  */
 export const dockerAvailabilityReport = z.object({
   available: z.boolean(),
   reason: z.string().nullable(),
+  executorImage: z.object({ name: z.string().min(1), present: z.boolean() }),
 });
 export type DockerAvailabilityReport = z.infer<typeof dockerAvailabilityReport>;
+
+/** The image a new container executor can use right now, or null when there is none to use. */
+export function usableExecutorImage(
+  report: DockerAvailabilityReport | null | undefined,
+): string | null {
+  return report?.available && report.executorImage.present ? report.executorImage.name : null;
+}
 
 /** The kind a new Executor Profile starts as: the container when there is one, else the host. */
 export function preferredExecutorKind(dockerAvailable: boolean): ExecutorKind {
   return dockerAvailable ? "docker" : "local";
+}
+
+/**
+ * Where "Connect Claude" puts Claude (roadmap B4, E1). One rule for the server, which acts on it,
+ * and the setup screen, which says what it will do before the Owner presses Connect.
+ *
+ * - No executor yet: the isolated container when its image is there, else this machine.
+ * - The setup's own local executor, in a Workspace with no container executor at all
+ *   (`replaceable`): moved into the container once the image exists. This is the newcomer who
+ *   connected first and built the image afterwards; re-running the setup is how they get the
+ *   isolation they were told about. The local executor is left in place, not removed.
+ * - Anything else is kept. An executor the Owner made, or a local one kept as the default while a
+ *   container executor exists, is a choice someone made, and the setup does not overrule it.
+ */
+export type SetupExecutorPlan =
+  | { action: "keep" }
+  | { action: "create"; kind: "docker"; image: string }
+  | { action: "create"; kind: "local" };
+
+export function setupExecutorPlan(args: {
+  /** The executor a new Task gets now (`quickTaskProfiles`), or null when there is none. */
+  current: { kind: ExecutorKind; replaceable: boolean } | null;
+  /** `usableExecutorImage`'s answer. */
+  isolatedImage: string | null;
+}): SetupExecutorPlan {
+  const { current, isolatedImage } = args;
+  if (current && !(current.replaceable && isolatedImage)) return { action: "keep" };
+  return isolatedImage
+    ? { action: "create", kind: "docker", image: isolatedImage }
+    : { action: "create", kind: "local" };
 }
 
 /**

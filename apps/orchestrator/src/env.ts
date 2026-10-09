@@ -1,3 +1,4 @@
+import { DEFAULT_EXECUTOR_IMAGE } from "@solow/contracts";
 import { z } from "zod";
 
 /** Validated orchestrator env (no bare process.env). */
@@ -55,6 +56,13 @@ const schema = z.object({
    * "this executor is unavailable".
    */
   SOLOW_DOCKER_PULL_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  /**
+   * The image the guided setup gives a new container executor (roadmap B4): one that carries the
+   * harnesses, since the driver spawns the bare command inside it. The default is the tag
+   * `make executor-image` builds; naming another here is how an operator who keeps their own
+   * harness image makes it the isolated default instead. Only offered once the daemon has it.
+   */
+  SOLOW_EXECUTOR_IMAGE: z.string().min(1).default(DEFAULT_EXECUTOR_IMAGE),
   /**
    * `uid:gid` for the processes inside the container, overriding the orchestrator's own
    * `getuid()`/`getgid()`. Numeric on purpose: a username would be resolved against the

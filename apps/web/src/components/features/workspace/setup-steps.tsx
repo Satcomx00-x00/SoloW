@@ -9,6 +9,8 @@ import {
   type SetupStepKey,
   type SetupTestProblem,
   type SetupTestResultDto,
+  setupExecutorPlan,
+  usableExecutorImage,
   type WorkspaceSetupDto,
 } from "@solow/contracts";
 import { CircleCheck, CircleX } from "lucide-react";
@@ -115,19 +117,36 @@ const BILLING_OPTIONS = [
 /**
  * Where Claude will work, said before the Owner presses Connect.
  *
- * The server keeps whatever executor a new Task already gets and makes a local one only when
- * there is none — never a container on its own, because a container needs an image with Claude
- * Code inside it and SoloW ships none. So the warning for running unattended on this machine is
- * shown here, in front of the choice, and never discovered afterwards.
+ * The same rule the server applies (`setupExecutorPlan`): the isolated container when Docker is
+ * here and already has the image with Claude Code in it, otherwise whatever a new Task already
+ * gets, and this machine when there is nothing. So the warning for running unattended on this
+ * machine is shown here, in front of the choice, and never discovered afterwards — and when the
+ * only thing missing for isolation is the image, this says how to build it.
  */
 function WhereItRuns({ setup }: { setup: WorkspaceSetupDto }) {
-  const kind = setup.executorKind ?? "local";
   const permissionMode = setup.agent?.permissionMode ?? DEFAULT_HARNESS_PERMISSION_MODE;
-  // Only asked when Claude would work on this machine — the one case the answer is worth saying.
+  // Only asked when the answer could change where Claude works: no executor yet, or one this
+  // machine runs.
   const docker = trpc.profile.executor.dockerAvailability.useQuery(undefined, {
-    enabled: kind === "local",
+    enabled: setup.executorKind === null || setup.executorKind === "local",
   });
+  const plan = setupExecutorPlan({
+    current: setup.executorKind
+      ? { kind: setup.executorKind, replaceable: setup.executorReplaceable }
+      : null,
+    isolatedImage: usableExecutorImage(docker.data),
+  });
+  const kind = plan.action === "create" ? plan.kind : (setup.executorKind ?? "local");
 
+  if (plan.action === "create" && plan.kind === "docker") {
+    return (
+      <p className="text-muted-foreground text-sm">
+        Claude will work in an isolated container on this machine, from the{" "}
+        <code className="font-mono">{plan.image}</code> image. It works on its own copy of the
+        repository and cannot see the rest of your files.
+      </p>
+    );
+  }
   if (kind === "docker") {
     return (
       <p className="text-muted-foreground text-sm">
@@ -154,16 +173,30 @@ function WhereItRuns({ setup }: { setup: WorkspaceSetupDto }) {
         before it acts. An issue or a web page written to mislead it could steer it, so point it
         only at repositories and issues you trust.
       </HostRunWarning>
-      {docker.data?.available && (
-        <p className="text-muted-foreground text-xs leading-relaxed">
-          Docker is installed here, so Claude could work in an isolated container instead. That
-          needs a container image with Claude Code in it; once you have one,{" "}
-          <Link className="underline underline-offset-2" href="/settings?section=executor-profiles">
-            set it up in Settings
-          </Link>
-          .
-        </p>
-      )}
+      {docker.data?.available &&
+        // The setup would move Claude into the container by itself, once the image exists.
+        (setup.executorKind === null || setup.executorReplaceable ? (
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            Docker is installed here, so Claude can work in an isolated container instead. Build its
+            image once, in a terminal on this machine, with{" "}
+            <code className="font-mono">npx @satcomx00-x00/solow executor-image</code> (or{" "}
+            <code className="font-mono">make executor-image</code> in a SoloW checkout), then
+            connect{setup.executorKind === null ? "" : " again"}.
+          </p>
+        ) : (
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            Docker is installed here, so Claude could work in an isolated container instead.{" "}
+            <Link
+              className="underline underline-offset-2"
+              href="/settings?section=executor-profiles"
+            >
+              Set one up in Settings
+            </Link>
+            {usableExecutorImage(docker.data)
+              ? `, with the ${docker.data.executorImage.name} image.`
+              : "."}
+          </p>
+        ))}
     </div>
   );
 }

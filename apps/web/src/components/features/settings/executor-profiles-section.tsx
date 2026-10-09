@@ -6,6 +6,7 @@ import {
   type ExecutorProfileDto,
   LOCAL_EXECUTOR_NOTE,
   preferredExecutorKind,
+  usableExecutorImage,
 } from "@solow/contracts";
 import { Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -62,10 +63,15 @@ const RUNNABLE_KINDS: readonly ExecutorKind[] = ["local", "docker"];
  * Switch kinds without losing what the two kinds have in common. The prepare script and the
  * environment are shared by every member, so retyping them after a mis-click would be the form
  * punishing the user for exploring.
+ *
+ * A new Docker executor starts from the image the guided setup would use, when the daemon has it
+ * (`usableExecutorImage`): the one image known to carry the harnesses, rather than a blank field
+ * that has to be filled with a name the Owner may not know.
  */
 function blankConfig(
   kind: ExecutorKind,
   shared: { prepareScript?: string | undefined },
+  isolatedImage: string | null,
 ): ExecutorConfig {
   const base = {
     env: {},
@@ -75,7 +81,7 @@ function blankConfig(
     case "local":
       return { kind, ...base };
     case "docker":
-      return { kind, image: "", mounts: [], ...base };
+      return { kind, image: isolatedImage ?? "", mounts: [], ...base };
     case "ssh":
       return { kind, host: "", port: 22, user: "", keySecretId: "", ...base };
     case "cloud":
@@ -136,7 +142,8 @@ export function ExecutorProfilesSection() {
   });
   const preferredKind = preferredExecutorKind(availability.data?.available === true);
   const [picked, setConfig] = useState<ExecutorConfig | null>(null);
-  const config = picked ?? blankConfig(preferredKind, {});
+  const isolatedImage = usableExecutorImage(availability.data);
+  const config = picked ?? blankConfig(preferredKind, {}, isolatedImage);
   const [envPairs, setEnvPairs] = useState<EnvPair[]>([]);
   // Beside the config rather than inside it, for the reason `mount-rows.tsx` states: a row being
   // typed is not yet a mount, and the contract would refuse a config carrying one.
@@ -320,9 +327,13 @@ export function ExecutorProfilesSection() {
             <Select
               onValueChange={(v) =>
                 setConfig(
-                  blankConfig(v as ExecutorKind, {
-                    ...(config.prepareScript ? { prepareScript: config.prepareScript } : {}),
-                  }),
+                  blankConfig(
+                    v as ExecutorKind,
+                    {
+                      ...(config.prepareScript ? { prepareScript: config.prepareScript } : {}),
+                    },
+                    isolatedImage,
+                  ),
                 )
               }
               value={config.kind}

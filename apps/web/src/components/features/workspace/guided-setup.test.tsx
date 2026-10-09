@@ -29,6 +29,7 @@ const bare = (over: Partial<WorkspaceSetupDto> = {}): WorkspaceSetupDto => ({
   ],
   agent: null,
   executorKind: null,
+  executorReplaceable: false,
   ready: false,
   ...over,
 });
@@ -55,7 +56,17 @@ const ready = (): WorkspaceSetupDto =>
     ready: true,
   });
 
-const noDocker = () => ({ available: false, reason: "docker: not found" });
+const IMAGE = "solow-executor:local";
+const noDocker = () => ({
+  available: false,
+  reason: "docker: not found",
+  executorImage: { name: IMAGE, present: false },
+});
+const dockerWithImage = (present: boolean) => () => ({
+  available: true,
+  reason: null,
+  executorImage: { name: IMAGE, present },
+});
 
 describe("GuidedSetup", () => {
   it("opens on Connect Claude and asks only how you pay and the token", async () => {
@@ -77,14 +88,57 @@ describe("GuidedSetup", () => {
   it("says Claude will run unattended on this machine before Connect is pressed", async () => {
     renderWithTrpc(<GuidedSetup />, {
       "workspace.setup": () => bare(),
-      "profile.executor.dockerAvailability": () => ({ available: true, reason: null }),
+      "profile.executor.dockerAvailability": dockerWithImage(false),
     });
 
     expect(
       await screen.findByText("It works with your access, without asking first"),
     ).toBeDefined();
-    // Docker is there, but a container needs an image with Claude Code in it — offered, not made.
+    // Docker is there but the image with Claude Code in it is not: say how to build it.
     expect(await screen.findByText(/Docker is installed here/)).toBeDefined();
+    expect(screen.getByText("npx @satcomx00-x00/solow executor-image")).toBeDefined();
+    expect(screen.getByText("make executor-image")).toBeDefined();
+  });
+
+  it("says Claude will work in the isolated container once its image is built", async () => {
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => bare(),
+      "profile.executor.dockerAvailability": dockerWithImage(true),
+    });
+
+    expect(await screen.findByText(/in an isolated container on this machine/)).toBeDefined();
+    expect(screen.getByText(IMAGE)).toBeDefined();
+    expect(screen.queryByText("It works with your access, without asking first")).toBeNull();
+  });
+
+  it("moves the setup's own local executor into the container when connecting again", async () => {
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => connected({ executorReplaceable: true }),
+      "profile.executor.dockerAvailability": dockerWithImage(true),
+    });
+    // The first "Change" is the Connect Claude step's: the steps are listed in order.
+    const [change] = await screen.findAllByRole("button", { name: "Change" });
+    if (!change) throw new Error("no Change button");
+    fireEvent.click(change);
+
+    expect(await screen.findByText(/in an isolated container on this machine/)).toBeDefined();
+  });
+
+  it("leaves a local executor the Owner chose alone, and points at Settings instead", async () => {
+    renderWithTrpc(<GuidedSetup />, {
+      "workspace.setup": () => connected({ executorReplaceable: false }),
+      "profile.executor.dockerAvailability": dockerWithImage(true),
+    });
+    // The first "Change" is the Connect Claude step's: the steps are listed in order.
+    const [change] = await screen.findAllByRole("button", { name: "Change" });
+    if (!change) throw new Error("no Change button");
+    fireEvent.click(change);
+
+    expect(
+      await screen.findByText("It works with your access, without asking first"),
+    ).toBeDefined();
+    expect(await screen.findByRole("link", { name: "Set one up in Settings" })).toBeDefined();
+    expect(screen.queryByText(/executor-image/)).toBeNull();
   });
 
   it("sends the billing mode and the credential in one call", async () => {

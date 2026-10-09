@@ -6,8 +6,8 @@
 # guards nothing. Typecheck runs on push, not on every commit, for the same reason.
 #
 # The tools are the ones the editor and CI already use: biome from this repo's node_modules, and
-# gitleaks, shellcheck and shfmt from the machine (installed by mise). No hook pulls a second copy
-# of a linter from a hook repository — `language: system` on purpose.
+# gitleaks, shellcheck, shfmt and hadolint from the machine (installed by mise). No hook pulls a
+# second copy of a linter from a hook repository — `language: system` on purpose.
 
 default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
@@ -72,6 +72,14 @@ repos:
         entry: shfmt -i 4 -ci -sr -w
         language: system
         types: [shell]
+
+      # The executor image (`docker/executor/Dockerfile`), with the machine's hadolint like the
+      # shell linters above.
+      - id: hadolint
+        name: hadolint
+        entry: hadolint
+        language: system
+        types: [dockerfile]
 
       # The subject is what next-version.ts decides the release from and what git-cliff writes
       # CHANGELOG.md from; see scripts/check-commit-msg.ts.

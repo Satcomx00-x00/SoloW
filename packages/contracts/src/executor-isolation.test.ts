@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import {
+  DEFAULT_EXECUTOR_IMAGE,
   preferredExecutorKind,
   quickTaskProfiles,
   runsUnattendedOnHost,
+  setupExecutorPlan,
+  usableExecutorImage,
 } from "./executor-isolation.js";
 
 describe("preferredExecutorKind", () => {
@@ -72,5 +75,59 @@ describe("quickTaskProfiles", () => {
       agentProfileId: null,
       executorProfileId: null,
     });
+  });
+});
+
+describe("usableExecutorImage", () => {
+  const image = (present: boolean) => ({ name: DEFAULT_EXECUTOR_IMAGE, present });
+
+  it("names the image only when Docker answers and already has it", () => {
+    expect(usableExecutorImage({ available: true, reason: null, executorImage: image(true) })).toBe(
+      DEFAULT_EXECUTOR_IMAGE,
+    );
+    // Not built yet: a local tag cannot be pulled, so a container would never start.
+    expect(
+      usableExecutorImage({ available: true, reason: null, executorImage: image(false) }),
+    ).toBeNull();
+    expect(
+      usableExecutorImage({ available: false, reason: "no daemon", executorImage: image(false) }),
+    ).toBeNull();
+    // "Could not ask" is not a yes.
+    expect(usableExecutorImage(null)).toBeNull();
+  });
+});
+
+describe("setupExecutorPlan", () => {
+  const image = "solow-executor:local";
+
+  it("starts a Workspace with no executor in the container when the image is there", () => {
+    expect(setupExecutorPlan({ current: null, isolatedImage: image })).toEqual({
+      action: "create",
+      kind: "docker",
+      image,
+    });
+    expect(setupExecutorPlan({ current: null, isolatedImage: null })).toEqual({
+      action: "create",
+      kind: "local",
+    });
+  });
+
+  it("moves the setup's own local executor into the container once the image exists", () => {
+    const current = { kind: "local" as const, replaceable: true };
+    expect(setupExecutorPlan({ current, isolatedImage: image })).toEqual({
+      action: "create",
+      kind: "docker",
+      image,
+    });
+    // Without the image there is nothing better to move to.
+    expect(setupExecutorPlan({ current, isolatedImage: null })).toEqual({ action: "keep" });
+  });
+
+  it("keeps an executor someone chose, whatever the image", () => {
+    for (const kind of ["local", "docker", "ssh", "cloud"] as const) {
+      expect(
+        setupExecutorPlan({ current: { kind, replaceable: false }, isolatedImage: image }),
+      ).toEqual({ action: "keep" });
+    }
   });
 });

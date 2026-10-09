@@ -41034,6 +41034,9 @@
                         null
                       ]
                     },
+                    "executorReplaceable": {
+                      "type": "boolean"
+                    },
                     "ready": {
                       "type": "boolean"
                     }
@@ -41044,6 +41047,7 @@
                     "steps",
                     "agent",
                     "executorKind",
+                    "executorReplaceable",
                     "ready"
                   ]
                 }
