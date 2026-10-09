@@ -7,14 +7,6 @@
 # Reviewed: 2026-08-18. Re-check whenever `bun audit` output changes or a listed assumption
 # below stops holding.
 
-# --- h3 (via inngest, trpc-to-openapi) -------------------------------------------------------
-# Both advisories are in h3's `serveStatic` and `EventStream` handlers. SoloW mounts no
-# h3 server: `trpc-to-openapi` is used for schema generation only (scripts/gen-openapi.ts), and
-# the Inngest `serve` HTTP handler is not wired yet.
-# REACHABLE AGAIN once the Inngest serve endpoint lands (TASK-019 follow-up) — upgrade h3 then.
-1115161  # h3: SSE injection via unsanitized newlines
-1116543  # h3 v1: request smuggling (TE.TE)
-
 # --- postcss (via next, @tailwindcss/postcss) ------------------------------------------------
 # Build-time CSS processing only. Both advisories require processing attacker-supplied CSS or
 # source maps; the only CSS compiled is this repository's own, at build time.
