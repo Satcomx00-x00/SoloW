@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { trpc } from "../support/flows.js";
+import { trpc, warmRoutes } from "../support/flows.js";
 
 /**
  * Navigation smoke (Decision 0029): the sidebar, the breadcrumb, the command palette and the
@@ -38,6 +38,8 @@ test.describe("navigation", () => {
     page,
   }) => {
     const errors = failOnPageErrors(page);
+    // The walk's first click on a cold page waited past its 30 s on a loaded runner.
+    await warmRoutes(page, ["/unassigned", "/workflows", "/history", "/settings"]);
     await page.goto("/projects");
     await expect(sidebar(page)).toBeVisible();
 
