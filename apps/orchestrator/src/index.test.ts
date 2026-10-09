@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeFakeClaudeBin } from "@solow/claude-code/testing";
 import type { HarnessProtocol } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
 import { encryptSecret, harnessCatalog, harnessProfile, secret, workspace } from "@solow/db";
@@ -233,6 +234,38 @@ describe("handleProbePost", () => {
     const body = (await res.json()) as { ok: boolean; reason: string };
     expect(body.ok).toBe(false);
     expect(body.reason).toContain("installed and on PATH");
+  });
+
+  it("proves the credential only when asked for a turn (the setup's test run)", async () => {
+    // Claude Code starts with any token at all — the bare probe passes on a rejected one, which
+    // is why the guided setup asks for a turn: the provider only reads the credential on a prompt.
+    const dir = await mkdtemp(join(tmpdir(), "solow-probe-turn-"));
+    const command = await writeFakeClaudeBin(dir, {
+      turns: [{ text: ["Failed to authenticate. API Error: 401 OAuth access token is invalid."] }],
+      failWith: "success",
+    });
+    const id = await seedProfile("ws-1", { command, protocol: "claude_code_stream_json" });
+
+    const bare = await post({ ticket: ticketFor("ws-1"), agentProfileId: id });
+    expect(await bare.json()).toMatchObject({ ok: true });
+
+    const turned = await post({ ticket: ticketFor("ws-1"), agentProfileId: id, turn: true });
+    expect(turned.status).toBe(200);
+    expect(await turned.json()).toMatchObject({
+      ok: false,
+      failure: "credential",
+      answered: false,
+    });
+  });
+
+  it("reports an answered turn as the proof it is", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "solow-probe-turn-"));
+    const command = await writeFakeClaudeBin(dir, { turns: [{ text: ["ready"] }] });
+    const id = await seedProfile("ws-1", { command, protocol: "claude_code_stream_json" });
+
+    const res = await post({ ticket: ticketFor("ws-1"), agentProfileId: id, turn: true });
+
+    expect(await res.json()).toMatchObject({ ok: true, answered: true });
   });
 
   it("fills the capability cache from the handshake, with no run needed", async () => {
