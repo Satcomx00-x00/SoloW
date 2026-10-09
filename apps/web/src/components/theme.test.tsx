@@ -260,7 +260,7 @@ describe("useTheme", () => {
     renderWithTrpc(<Probe />, {
       "preference.getAppearance": () => appearance("dark"),
       "preference.setAppearance": () => {
-        throw new Error("Appearance is turned off for this Workspace");
+        throw new Error("FLAG_DISABLED");
       },
     });
     await waitFor(() => expect(isDark()).toBe(true));

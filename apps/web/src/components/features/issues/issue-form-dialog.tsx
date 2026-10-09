@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
@@ -298,7 +299,7 @@ export function IssueFormDialog({
           </div>
           {mutation.error && (
             <p className="text-destructive text-sm" role="alert">
-              {mutation.error.message}
+              {describeError(mutation.error)}
             </p>
           )}
         </div>

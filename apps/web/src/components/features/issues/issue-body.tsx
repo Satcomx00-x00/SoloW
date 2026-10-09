@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { HarnessMarkdown } from "@/components/features/task/markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -162,8 +163,8 @@ export function IssueBody({ issue }: { issue: IssueDto }) {
       </div>
 
       {(error || detail.error) && (
-        <p className="font-mono text-2xs text-state-failed" role="alert">
-          {(error ?? detail.error)?.message}
+        <p className="text-2xs text-state-failed" role="alert">
+          {describeError(error ?? detail.error)}
         </p>
       )}
     </div>

@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import {
@@ -147,7 +148,7 @@ export function TaskDefaultsSection() {
 
       {save.error && (
         <p className="text-destructive text-sm" role="alert">
-          {save.error.message}
+          {describeError(save.error)}
         </p>
       )}
 

@@ -323,7 +323,8 @@ describe("Board (wired)", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("UNAUTHORIZED");
+      expect(screen.getByRole("alert").textContent).toContain("Sign in again");
+      expect(screen.getByRole("alert").textContent).not.toContain("UNAUTHORIZED");
     });
   });
 

@@ -882,6 +882,24 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
   });
 });
 
+describe("TaskWorkspace for a task that is not there", () => {
+  it("says so in words and links somewhere that exists", async () => {
+    renderWithTrpc(<TaskWorkspace taskId="task-gone" />, {
+      "task.get": () => {
+        throw new Error("NOT_FOUND");
+      },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("That task no longer exists");
+    expect(alert.textContent).not.toContain("NOT_FOUND");
+    // `/board` is not a route any more; with no Task there is no Project to name.
+    expect(screen.getByRole("link", { name: "Back to projects" }).getAttribute("href")).toBe(
+      "/projects",
+    );
+  });
+});
+
 describe("TaskWorkspace destructive actions", () => {
   it("does not reject on a single click — the discard is confirmed first", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {

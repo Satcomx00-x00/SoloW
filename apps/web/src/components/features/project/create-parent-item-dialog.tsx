@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import { formatDate, isoToday, parseDateInput } from "./date-input";
@@ -414,8 +415,9 @@ export function CreateParentItemDialog({
 
               {error && (
                 <p className="text-destructive text-sm" role="alert">
-                  {/* The provider's own refusal, kept with the form intact (F23a error rule). */}
-                  {error.message}
+                  {/* The provider's refusal, kept with the form intact (F23a error rule) and said
+                      as a sentence: its raw text carries a URL and a JSON body. */}
+                  {describeError(error)}
                 </p>
               )}
             </div>

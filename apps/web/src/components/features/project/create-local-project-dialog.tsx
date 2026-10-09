@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -86,7 +87,7 @@ export function CreateLocalProjectDialog({
           </div>
 
           {create.error && (
-            <p className="mt-2 text-2xs text-state-failed">{create.error.message}</p>
+            <p className="mt-2 text-2xs text-state-failed">{describeError(create.error)}</p>
           )}
 
           <DialogFooter className="mt-4">

@@ -206,14 +206,19 @@ describe("CreateParentItemDialog · group container", () => {
     renderWithTrpc(groupDialog(), {
       "project.listGroups": () => [group()],
       "project.createEpic": () => {
-        throw new Error("Insufficient permissions on this group.");
+        // What `@solow/scm` throws on a refusal, URL and JSON body included.
+        throw new Error(
+          'gitlab POST to https://gitlab.com/api/v4/groups/7/epics failed: 403 {"message":"403 Forbidden"}',
+        );
       },
     });
 
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Reliability" } });
     fireEvent.click(screen.getByRole("button", { name: /Create epic/ }));
 
-    expect(await screen.findByText("Insufficient permissions on this group.")).toBeDefined();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("GitLab refused SoloW's credential");
+    expect(alert.textContent).not.toContain("gitlab.com/api");
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Reliability");
   });
 });
@@ -297,16 +302,21 @@ describe("CreateParentItemDialog · repository container", () => {
     renderWithTrpc(repoDialog(), {
       "repository.list": () => page([repository()]),
       "issue.createParentOnProvider": () => {
-        throw new Error("Resource not accessible by personal access token.");
+        throw new Error(
+          'github POST to https://api.github.com/repos/acme/gate/issues failed: 403 {"message":"Resource not accessible by personal access token"}',
+        );
       },
     });
 
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Reliability" } });
     fireEvent.click(screen.getByRole("button", { name: /Create parent issue/ }));
 
-    expect(
-      await screen.findByText("Resource not accessible by personal access token."),
-    ).toBeDefined();
+    // The provider's reason names the missing permission, so it is kept; the URL is not.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "GitHub refused SoloW's credential (“Resource not accessible by personal access token”)",
+    );
+    expect(alert.textContent).not.toContain("api.github.com");
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Reliability");
   });
 });

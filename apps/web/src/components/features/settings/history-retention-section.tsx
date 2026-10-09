@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebounced } from "@/hooks/use-debounced";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { HistoryRetentionNotice } from "./history-retention-notice";
 import { SectionStatus, SettingsField, SettingsLoading, SettingsSection } from "./settings-shell";
@@ -148,7 +149,7 @@ export function HistoryRetentionSection() {
             ) : counted === undefined ? (
               settledDays === draftDays && preview.error ? (
                 <p className="text-destructive" role="alert">
-                  Could not count what this would remove: {preview.error.message}
+                  Could not count what this would remove. {describeError(preview.error)}
                 </p>
               ) : (
                 <Skeleton className="h-4 w-80" />
@@ -197,7 +198,7 @@ export function HistoryRetentionSection() {
 
           {save.error && (
             <p className="text-destructive text-sm" role="alert">
-              {save.error.message}
+              {describeError(save.error)}
             </p>
           )}
         </>

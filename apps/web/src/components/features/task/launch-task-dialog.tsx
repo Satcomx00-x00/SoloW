@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -114,7 +115,7 @@ export function LaunchTaskDialog({
         </div>
         {error && (
           <p className="text-destructive text-sm" role="alert">
-            {error.message}
+            {describeError(error)}
           </p>
         )}
         <DialogFooter>

@@ -524,7 +524,10 @@ describe("CreateIssueDialog", () => {
         "repository.list": () => list([repo()]),
         ...composeReads,
         "issue.createOnProvider": () => {
-          throw new Error("Label 'blocked' does not exist.");
+          // What `@solow/scm` throws on a refusal, URL and JSON body included.
+          throw new Error(
+            'github POST to https://api.github.com/repos/acme/gate/issues failed: 422 {"message":"Label blocked does not exist"}',
+          );
         },
       },
     );
@@ -532,7 +535,12 @@ describe("CreateIssueDialog", () => {
     fireEvent.change(await screen.findByLabelText(/Title/), { target: { value: "Cold start" } });
     fireEvent.click(screen.getByRole("button", { name: /Create issue/ }));
 
-    expect(await screen.findByText("Label 'blocked' does not exist.")).toBeDefined();
+    // The provider's own reason survives; the URL and the JSON around it do not.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "GitHub rejected the request (“Label blocked does not exist”)",
+    );
+    expect(alert.textContent).not.toContain("api.github.com");
     // Still on Compose, title intact — nothing typed was lost.
     expect((screen.getByLabelText(/Title/) as HTMLInputElement).value).toBe("Cold start");
   });

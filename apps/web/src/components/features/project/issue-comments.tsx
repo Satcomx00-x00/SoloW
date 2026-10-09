@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { relativeAge } from "@/lib/relative-time";
 import { trpc } from "@/trpc/react";
 
@@ -144,7 +145,7 @@ export function IssueComments({ issueId }: { issueId: string }) {
               // The provider's own refusal — "you do not have write access" is a different problem
               // from "the network is down", and only one of them is worth retrying.
               <p className="min-w-0 flex-1 truncate text-2xs text-state-failed">
-                {post.error.message}
+                {describeError(post.error)}
               </p>
             ) : (
               <span />

@@ -66,7 +66,7 @@ describe("CreateLocalProjectDialog", () => {
   it("shows an error from the mutation rather than closing on it", async () => {
     renderWithTrpc(<CreateLocalProjectDialog onCreated={() => {}} />, {
       "project.createLocal": () => {
-        throw new Error("Something went wrong.");
+        throw new Error("SQLITE_BUSY: database is locked");
       },
     });
 
@@ -76,6 +76,10 @@ describe("CreateLocalProjectDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-    expect(await screen.findByText("Something went wrong.")).toBeDefined();
+    // A sentence with a next step, never the driver's text.
+    expect(
+      await screen.findByText("That didn't work. Try again, or reload the page."),
+    ).toBeDefined();
+    expect(screen.queryByText(/SQLITE_BUSY/)).toBeNull();
   });
 });

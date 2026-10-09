@@ -6,7 +6,7 @@ import type {
   ProjectFilter,
   ProjectViewConfig,
 } from "@solow/contracts";
-import { DEFAULT_PROJECT_VIEW_CONFIG, PROJECT_TITLE_KEY } from "@solow/contracts";
+import { CommonErrorCode, DEFAULT_PROJECT_VIEW_CONFIG, PROJECT_TITLE_KEY } from "@solow/contracts";
 import {
   FILTER_ME,
   formatProjectFilter,
@@ -19,6 +19,7 @@ import {
 } from "@solow/core";
 import {
   ArrowDownAZ,
+  ArrowLeft,
   ArrowUpAZ,
   CalendarRange,
   Columns3,
@@ -31,6 +32,7 @@ import {
   Table2,
   Tags,
   Trash2,
+  TriangleAlert,
   UserX,
 } from "lucide-react";
 import Link from "next/link";
@@ -74,6 +76,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import {
   clearDraftOverlay,
@@ -177,6 +180,12 @@ export function projectHref(
   const base = `/projects/${projectId}`;
   return query ? `${base}?${query}` : base;
 }
+
+/** Here the thing that went missing is the Project, so the shared sentence can say so. */
+const PROJECT_WORDING = {
+  [CommonErrorCode.NotFound]:
+    "This project no longer exists — it may have been deleted, or the link is out of date.",
+};
 
 /**
  * The planning table for one Project.
@@ -731,7 +740,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       </div>
       {deleteProject.error && (
         <p className="border-b px-4 py-2 text-destructive text-xs" role="alert">
-          {deleteProject.error.message}
+          {describeError(deleteProject.error)}
         </p>
       )}
 
@@ -1044,7 +1053,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       {setValue.error && (
         <p className="shrink-0 border-b bg-state-failed/5 px-4 py-1.5 text-2xs text-state-failed">
           {/* The provider's value is still on screen: the write failed, so nothing changed. */}
-          {setValue.error.message}
+          {describeError(setValue.error)}
         </p>
       )}
 
@@ -1123,6 +1132,25 @@ export function ProjectView({ projectId }: { projectId: string }) {
             onSort={(field) => patchDraft({ sort: cycleSort(config.sort, field) })}
           />
         )
+      ) : project.error ? (
+        // A Project that is gone (or an id from an old link) used to leave "Loading…" up for
+        // good: NOT_FOUND is not retried, so nothing ever replaced it.
+        <div className="flex items-start gap-2.5 p-6 text-sm" role="alert">
+          <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
+          <div className="space-y-3">
+            <div>
+              <p className="font-medium">Project not available</p>
+              <p className="mt-0.5 text-muted-foreground text-xs">
+                {describeError(project.error, PROJECT_WORDING)}
+              </p>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/projects">
+                <ArrowLeft /> Back to projects
+              </Link>
+            </Button>
+          </div>
+        </div>
       ) : (
         <p className="p-6 text-muted-foreground text-sm">Loading…</p>
       )}

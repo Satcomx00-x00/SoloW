@@ -57,6 +57,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -393,9 +394,10 @@ export function CreateIssueDialog({
 
                 {create.error && (
                   <p className="text-destructive text-sm" role="alert">
-                    {/* The provider's own words, kept here with the form intact (F23a error rule): a
-                        rejected label or an assignee without access is fixed in place, not retyped. */}
-                    {create.error.message}
+                    {/* The provider's refusal (its own reason kept when it gave one), with the form
+                        intact (F23a error rule): a rejected label or an assignee without access is
+                        fixed in place, not retyped. */}
+                    {describeError(create.error)}
                   </p>
                 )}
               </div>

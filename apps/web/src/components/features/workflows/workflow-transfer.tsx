@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
@@ -76,7 +77,7 @@ export function ExportWorkflowButton({ workflow }: { workflow: WorkflowWithSteps
       const document = await utils.client.workflow.export.query({ id: workflow.id });
       saveJson(workflowDocumentFilename(workflow.name), `${JSON.stringify(document, null, 2)}\n`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -100,7 +101,7 @@ export function ExportWorkflowButton({ workflow }: { workflow: WorkflowWithSteps
         workspace.
       </p>
       {error && (
-        <p className="font-mono text-2xs text-state-failed" role="alert">
+        <p className="text-2xs text-state-failed" role="alert">
           {error}
         </p>
       )}
@@ -114,15 +115,15 @@ function readDocument(text: string): { document: WorkflowDocument } | { error: s
   try {
     json = JSON.parse(text);
   } catch {
-    return { error: "That file is not JSON." };
+    return { error: "That file is not JSON. Choose a file saved with Export as JSON." };
   }
   const parsed = workflowDocumentSchema.safeParse(json);
   if (parsed.success) return { document: parsed.data };
   const first = parsed.error.issues[0];
   return {
     error: first?.path.length
-      ? `Not a workflow document: ${first.path.join(".")} — ${first.message}.`
-      : "Not a workflow document.",
+      ? `Not a workflow document: ${first.path.join(".")} — ${first.message}. Choose a file saved with Export as JSON.`
+      : "Not a workflow document. Choose a file saved with Export as JSON.",
   };
 }
 
@@ -315,8 +316,8 @@ export function ImportWorkflowDialog({ trigger }: { trigger: ReactNode }) {
           )}
 
           {imported.error && (
-            <p className="font-mono text-2xs text-state-failed" role="alert">
-              {imported.error.message}
+            <p className="text-2xs text-state-failed" role="alert">
+              {describeError(imported.error)}
             </p>
           )}
         </DialogBody>

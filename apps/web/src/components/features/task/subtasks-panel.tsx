@@ -28,6 +28,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
@@ -48,7 +49,7 @@ export function SubtaskList({ task }: { task: TaskDto }) {
   if (children.isError) {
     return (
       <p className="text-destructive text-xs" role="alert">
-        Could not load the sub-tasks: {children.error.message}
+        Could not load the sub-tasks. {describeError(children.error)}
       </p>
     );
   }
@@ -238,7 +239,7 @@ function SplitTaskDialog({
               />
               {create.error ? (
                 <p className="text-destructive text-xs" role="alert">
-                  {create.error.message}
+                  {describeError(create.error)}
                 </p>
               ) : null}
             </DialogBody>

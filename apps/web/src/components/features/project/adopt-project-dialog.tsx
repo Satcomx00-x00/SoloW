@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -231,7 +232,7 @@ export function AdoptProjectDialog({ onAdopted }: { onAdopted: (projectId: strin
           <p className="text-2xs text-state-failed">
             {/* The provider's own refusal, not a generic failure: a token without project scope
                 is a different problem from a project that vanished. */}
-            {adopt.error.message}
+            {describeError(adopt.error)}
           </p>
         )}
       </DialogContent>

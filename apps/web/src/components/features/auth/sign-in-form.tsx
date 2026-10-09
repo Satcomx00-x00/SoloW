@@ -20,6 +20,62 @@ import { signIn, signUp } from "@/lib/auth-client";
 /** Kept in step with BetterAuth's `minPasswordLength`; shown so the rule is not a surprise. */
 const MIN_PASSWORD_LENGTH = 12;
 
+/** What BetterAuth's client hands back on a refusal: a code for the known ones, and the HTTP status. */
+interface AuthFailure {
+  code?: string | undefined;
+  message?: string | undefined;
+  status?: number | undefined;
+}
+
+/**
+ * A BetterAuth refusal as a sentence with a next step.
+ *
+ * The form used to show BetterAuth's own message, which is written for the developer wiring it
+ * up: a fresh install opened at `127.0.0.1` instead of `localhost` was told "Invalid origin" and
+ * nothing else. Matched on `code` — the message is English prose BetterAuth is free to reword —
+ * and on the status for the rate limiter, which answers with no code at all.
+ */
+export function describeAuthFailure(
+  failure: AuthFailure,
+  mode: "sign-in" | "sign-up",
+  origin: string,
+): string {
+  switch (failure.code) {
+    case "INVALID_ORIGIN":
+    case "MISSING_OR_NULL_ORIGIN":
+    case "CROSS_SITE_NAVIGATION_LOGIN_BLOCKED":
+      return `SoloW is not set up to accept sign-ins from ${origin}. Open it at the address it was started with, or set SOLOW_WEB_URL to ${origin} and restart SoloW.`;
+    case "INVALID_EMAIL_OR_PASSWORD":
+    case "INVALID_PASSWORD":
+    case "USER_NOT_FOUND":
+    case "CREDENTIAL_ACCOUNT_NOT_FOUND":
+      return "That email and password don't match the owner account. Check both, then try again.";
+    case "USER_ALREADY_EXISTS":
+    case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL":
+    case "FAILED_TO_CREATE_USER":
+      // The only user creation SoloW refuses is a second Owner (the hook in `server/auth`), so
+      // in setup mode this means another tab or person finished setup first.
+      return mode === "sign-up"
+        ? "This SoloW already has its owner account, and only one can be created. Reload the page to sign in instead."
+        : "The account could not be created. Reload the page, then try again.";
+    case "PASSWORD_TOO_SHORT":
+      return `That password is too short. Use at least ${MIN_PASSWORD_LENGTH} characters.`;
+    case "PASSWORD_TOO_LONG":
+      return "That password is too long. Use a shorter one.";
+    case "INVALID_EMAIL":
+      return "That doesn't look like an email address. Check it, then try again.";
+  }
+  if (failure.status === 429) {
+    return "Too many attempts in a short time. Wait a minute, then try again.";
+  }
+  if (failure.status !== undefined && failure.status >= 500) {
+    return "SoloW could not complete this. Try again; if it keeps happening, check the server log.";
+  }
+  return mode === "sign-up"
+    ? "The owner account could not be created. Check the fields, then try again."
+    : "Sign-in didn't work. Check your email and password, then try again.";
+}
+
 export function SignInForm({ ownerExists }: { ownerExists: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -37,7 +93,13 @@ export function SignInForm({ ownerExists }: { ownerExists: boolean }) {
         ? await signIn.email({ email, password })
         : await signUp.email({ email, password, name: name || email });
       if (result.error) {
-        setError(result.error.message ?? "Sign-in failed.");
+        setError(
+          describeAuthFailure(
+            result.error,
+            ownerExists ? "sign-in" : "sign-up",
+            window.location.origin,
+          ),
+        );
         return;
       }
       // A full navigation, not a client push: the session cookie has to reach the server
@@ -45,7 +107,7 @@ export function SignInForm({ ownerExists }: { ownerExists: boolean }) {
       router.replace("/projects");
       router.refresh();
     } catch {
-      setError("Could not reach the server.");
+      setError("Could not reach SoloW. Check it is still running, then try again.");
     } finally {
       setPending(false);
     }

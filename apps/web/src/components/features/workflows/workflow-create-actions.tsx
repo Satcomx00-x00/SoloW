@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { WorkflowStoreDialog } from "./workflow-store-dialog";
 import { ImportWorkflowDialog } from "./workflow-transfer";
@@ -90,8 +91,8 @@ function NewWorkflowButton() {
             Create
           </Button>
           {create.error && (
-            <p className="font-mono text-2xs text-state-failed" role="alert">
-              {create.error.message}
+            <p className="text-2xs text-state-failed" role="alert">
+              {describeError(create.error)}
             </p>
           )}
         </form>

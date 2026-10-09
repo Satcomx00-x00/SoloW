@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { joinCommandLine, splitCommandLine } from "@/lib/command-line";
+import { describeError } from "@/lib/errors";
 import { newRowId } from "@/lib/row-id";
 import { trpc } from "@/trpc/react";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
@@ -329,8 +330,8 @@ export function McpServersSection() {
         />
       )}
       {(update.error || remove.error) && (
-        <p className="font-mono text-feedback-error text-xs" role="alert">
-          {(update.error ?? remove.error)?.message}
+        <p className="text-feedback-error text-xs" role="alert">
+          {describeError(update.error ?? remove.error)}
         </p>
       )}
 
@@ -459,8 +460,8 @@ export function McpServersSection() {
             </Button>
           </div>
           {create.error && (
-            <p className="font-mono text-feedback-error text-xs" role="alert">
-              {create.error.message}
+            <p className="text-feedback-error text-xs" role="alert">
+              {describeError(create.error)}
             </p>
           )}
         </LibraryForm>

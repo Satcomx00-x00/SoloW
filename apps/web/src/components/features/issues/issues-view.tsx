@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import {
   ISSUE_STATUS_LABELS,
   ISSUE_STATUS_STYLE,
@@ -430,9 +431,7 @@ export function IssuesView({
             <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
             <div>
               <p className="font-medium">Failed to load issues</p>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                {issues.error.message}
-              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{describeError(issues.error)}</p>
             </div>
           </div>
         ))}

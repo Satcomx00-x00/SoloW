@@ -133,7 +133,9 @@ describe("WorkflowStoreDialog", () => {
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Install Refactor safely" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("WORKFLOW_NO_HARNESS_PROFILE");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("no harness profile for the imported steps");
+    expect(alert.textContent).not.toContain("WORKFLOW_NO_HARNESS_PROFILE");
     expect(pushed).not.toContain("/workflows/wf-1");
   });
 

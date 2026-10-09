@@ -142,7 +142,7 @@ describe("SecretsSection", () => {
     renderWithTrpc(<SecretsSection />, {
       "secret.list": () => [],
       "secret.set": () => {
-        throw new Error("rate_limited");
+        throw new Error("TOO_MANY_REQUESTS");
       },
     });
 
@@ -152,7 +152,7 @@ describe("SecretsSection", () => {
     fireEvent.submit(screen.getByRole("button", { name: "Save secret" }).closest("form")!);
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("rate_limited");
+      expect(screen.getByRole("alert").textContent).toContain("Wait a moment and try again");
     });
   });
 

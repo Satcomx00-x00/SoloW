@@ -3,6 +3,7 @@
 import { Archive } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { describeError } from "@/lib/errors";
 import { settingsHref } from "@/lib/navigation";
 import { trpc } from "@/trpc/react";
 
@@ -61,7 +62,7 @@ export function HistoryRetentionNotice({ linkToSettings = false }: { linkToSetti
       </div>
       {keep.error ? (
         <p className="w-full text-destructive text-xs" role="alert">
-          {keep.error.message}
+          {describeError(keep.error)}
         </p>
       ) : null}
     </div>
