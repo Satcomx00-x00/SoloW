@@ -26,7 +26,7 @@ import { clientDirectives } from "./harness/client-directives.js";
 import { explainWithHarness } from "./harness/explain.js";
 import { profileHarnessConfig } from "./harness/harness-config.js";
 import { resolveHarnessConfigEnv } from "./harness/hermetic-home.js";
-import { probeHarness } from "./harness/probe.js";
+import { answerProbeTurn, probeHarness } from "./harness/probe.js";
 import {
   type HarnessRegistry,
   harnessRegistry,
@@ -187,6 +187,9 @@ const OUT_OF_BAND_HOME = ".solow-harness-home";
  * The Workspace comes from the ticket's claims, never the body. A *board-scoped* ticket (no
  * `taskId`) is exactly right and is what the API mints: a probe belongs to Settings, before any
  * Task exists to scope it to.
+ *
+ * With `turn`, a probe that passed is followed by one real prompt (`answerProbeTurn`) — the
+ * guided setup's test run, which has to prove the credential and not only the binary.
  */
 /**
  * `POST /explain` — "ask this Task's own harness to explain something" (the Brief tab's
@@ -360,6 +363,7 @@ export async function handleProbePost(
         authMethods: [],
         agent: null,
         capabilities: { models: [], modes: [] },
+        failure: "harness",
       });
     }
     const shaped = prepareHarnessEnv({
@@ -378,6 +382,7 @@ export async function handleProbePost(
         authMethods: [],
         agent: null,
         capabilities: { models: [], modes: [] },
+        failure: "credential",
       });
     }
 
@@ -410,7 +415,17 @@ export async function handleProbePost(
         report.capabilities,
       ).catch(() => {});
     }
-    return Response.json(report);
+    if (!parsed.data.turn) return Response.json(report);
+    return Response.json(
+      await answerProbeTurn(executor, report, {
+        command: ctx.harnessCatalog.command,
+        args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
+        env: shaped.data,
+        cwd,
+        protocol: ctx.harnessCatalog.protocol,
+        ...(ctx.harnessProfile.model ? { model: ctx.harnessProfile.model } : {}),
+      }),
+    );
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

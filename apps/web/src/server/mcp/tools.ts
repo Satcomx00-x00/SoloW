@@ -77,6 +77,10 @@ const WITHHELD_NAMESPACES = new Set([
   // `outcomes` — spend, cycle times and every Task's title across the Workspace. Reporting for a
   // person, not work management; a read token held by one harness has no use for the others'.
   "outcomes",
+  // `setup` — the guided setup (roadmap E1). `connectClaude` stores a credential, which is the
+  // `secret` reasoning above with a Profile attached; `test` spends the Owner's tokens on a prompt.
+  // Neither is work management, and both are a person's first-party act.
+  "setup",
 ]);
 
 /** Withheld one procedure at a time, inside a namespace that is otherwise exposed. */

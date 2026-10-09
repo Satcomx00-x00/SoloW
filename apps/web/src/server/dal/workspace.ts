@@ -12,24 +12,18 @@ import {
   type ResetWorkspaceInput,
   type Result,
   type SetHistoryRetentionInput,
-  type SetupStepDto,
   type SyncRequestDto,
   type SyncStatusDto,
   type WorkspaceDto,
   type WorkspaceResetDto,
-  type WorkspaceSetupDto,
 } from "@solow/contracts";
 import {
   type Db,
-  executorProfile,
   FLAGS,
   type FlagKey,
-  harnessCatalog,
-  harnessProfile,
   previewHistoryPrune,
   repository,
   resetWorkspace,
-  secret,
   workspace,
 } from "@solow/db";
 import { and, count, eq, isNotNull } from "drizzle-orm";
@@ -255,100 +249,6 @@ export async function previewHistoryRetention(
   input: PreviewHistoryRetentionInput,
 ): Promise<Result<HistoryRetentionPreviewDto>> {
   return ok(previewHistoryPrune(ctx.db, ctx.workspaceId, input.days));
-}
-
-/** How many rows of one kind this Workspace has. */
-async function tally(
-  ctx: RequestContext,
-  table: typeof secret | typeof harnessProfile | typeof executorProfile | typeof repository,
-): Promise<number> {
-  const [row] = await ctx.db
-    .select({ n: count() })
-    .from(table)
-    .where(eq(table.workspaceId, ctx.workspaceId));
-  return row?.n ?? 0;
-}
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/**
- * What this Workspace still needs, read from what it actually has (2026-08-28).
- *
- * This replaced a fixture. A local install used to arrive with two invented companies, each
- * already holding a credential, a Harness Profile, an Executor and a repository — so the product
- * looked configured on first launch and the real gap stayed invisible: a Workspace made by a
- * genuine sign-up has none of those, and its feature flags are off, so the core loop is
- * disabled. The honest version is to ask the database.
- *
- * Derived on every read rather than stored. A checklist that recorded "completed" would go on
- * saying so after the Secret it counted was deleted, which is precisely the moment it should say
- * otherwise — so this doubles as a standing health view instead of a one-time ceremony.
- */
-export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<WorkspaceSetupDto>> {
-  const found = await getWorkspace(ctx);
-  if (!found.ok) return found;
-
-  const [catalog] = await ctx.db
-    .select({ n: count() })
-    .from(harnessCatalog)
-    .where(eq(harnessCatalog.workspaceId, ctx.workspaceId));
-  const harnesses = catalog?.n ?? 0;
-
-  const [secrets, profiles, executors, repositories] = await Promise.all([
-    tally(ctx, secret),
-    tally(ctx, harnessProfile),
-    tally(ctx, executorProfile),
-    tally(ctx, repository),
-  ]);
-
-  const flags = await getWorkspaceFlags(ctx.db, ctx.workspaceId);
-  const coreLoop = flags["ff-core-program"] ?? FLAGS["ff-core-program"].default;
-
-  const steps: SetupStepDto[] = [
-    // Always done by the time anyone can read this — but listed, because a checklist that only
-    // shows what is missing gives no sense of how much of the whole it represents.
-    { key: "workspace", done: true, detail: found.data.name, blockedBy: null },
-    {
-      key: "agents",
-      done: harnesses > 0,
-      detail: harnesses > 0 ? plural(harnesses, "harness") : "",
-      blockedBy: null,
-    },
-    {
-      key: "secret",
-      done: secrets > 0,
-      detail: secrets > 0 ? plural(secrets, "secret") : "",
-      blockedBy: null,
-    },
-    {
-      key: "agent-profile",
-      done: profiles > 0,
-      detail: profiles > 0 ? plural(profiles, "profile") : "",
-      // A Profile binds a harness to a credential, so offering the form before one exists would
-      // open it on an empty picker — a worse answer than naming what is missing.
-      blockedBy: profiles === 0 && secrets === 0 ? "secret" : null,
-    },
-    {
-      key: "executor",
-      done: executors > 0,
-      detail: executors > 0 ? plural(executors, "executor") : "",
-      blockedBy: null,
-    },
-    {
-      key: "repository",
-      done: repositories > 0,
-      detail: repositories > 0 ? plural(repositories, "repository", "repositories") : "",
-      blockedBy: null,
-    },
-    {
-      key: "core-loop",
-      done: coreLoop,
-      detail: coreLoop ? "on" : "",
-      blockedBy: null,
-    },
-  ];
-
-  return ok({ workspace: found.data, steps, ready: steps.every((step) => step.done) });
 }
 
 /**

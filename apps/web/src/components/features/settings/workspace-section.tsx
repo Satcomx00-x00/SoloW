@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,16 @@ export function WorkspaceSection() {
             <dt className="text-muted-foreground">Created</dt>
             <dd className="tabular-nums">{new Date(ws.createdAt).toLocaleString()}</dd>
           </dl>
+
+          {/* The guided setup is re-runnable from here (spec F18 FR-6), not only on first use. */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+            <p className="text-muted-foreground text-sm">
+              Connect Claude again, add a repository, or run the setup's test.
+            </p>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/setup">Open guided setup</Link>
+            </Button>
+          </div>
         </>
       )}
     </SettingsSection>

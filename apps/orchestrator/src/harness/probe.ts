@@ -10,8 +10,10 @@ import {
   requireMinimumVersion,
   sessionNewResultSchema,
 } from "@solow/acp";
-import { harnessProtocolDescriptor } from "@solow/contracts";
+import { type HarnessProbeFailure, harnessProtocolDescriptor } from "@solow/contracts";
+import { detectFailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
+import { explainWithHarness, type HarnessExplainInput } from "./explain.js";
 
 /**
  * Does this harness actually work? (2026-08-28.)
@@ -59,9 +61,13 @@ export interface HarnessProbeResult {
   agent: { name: string; version: string | null } | null;
   /** Advertised ids, for the Profile form's pins. Empty for a protocol that advertises nothing. */
   capabilities: { models: string[]; modes: string[] };
+  /** What kind of failure this was; absent when it worked. See `harnessProbeFailureSchema`. */
+  failure?: HarnessProbeFailure;
+  /** Whether a turn was answered — set only by `answerProbeTurn`. */
+  answered?: boolean;
 }
 
-const EMPTY: Omit<HarnessProbeResult, "ok" | "reason"> = {
+const EMPTY: Omit<HarnessProbeResult, "ok" | "reason" | "failure"> = {
   protocolVersion: null,
   authMethods: [],
   agent: null,
@@ -74,10 +80,25 @@ export const PROBE_TIMEOUT_MS = 20_000;
 function reasonFor(cause: unknown, command: string): string {
   const message = cause instanceof Error ? cause.message : String(cause);
   // The overwhelmingly common one, and the one worth naming precisely: the harness is not there.
-  if (/ENOENT|not found|No such file/i.test(message)) {
+  if (isMissing(message)) {
     return `"${command}" could not be started — is it installed and on PATH for the orchestrator?`;
   }
   return message;
+}
+
+function isMissing(message: string): boolean {
+  return /ENOENT|not found|No such file/i.test(message);
+}
+
+/** A thrown cause as a finished answer, classified so a caller need not parse the sentence. */
+function failedWith(cause: unknown, command: string): HarnessProbeResult {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return {
+    ok: false,
+    reason: reasonFor(cause, command),
+    failure: isMissing(message) ? "missing" : "harness",
+    ...EMPTY,
+  };
 }
 
 async function withTimeout<T>(work: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
@@ -112,6 +133,7 @@ export async function probeHarness(
     return {
       ok: false,
       reason: `this build has no runner for protocol "${input.protocol}"`,
+      failure: "harness",
       ...EMPTY,
     };
   }
@@ -123,7 +145,7 @@ export async function probeHarness(
       env: input.env,
     }) as unknown as ChildProcessHandle;
   } catch (cause) {
-    return { ok: false, reason: reasonFor(cause, input.command), ...EMPTY };
+    return failedWith(cause, input.command);
   }
 
   const kill = () => {
@@ -158,6 +180,7 @@ export async function probeHarness(
         return {
           ok: false,
           reason: `"${input.command}" exited immediately with code ${started.code}`,
+          failure: "harness",
           ...EMPTY,
         };
       }
@@ -215,6 +238,7 @@ export async function probeHarness(
       return {
         ok: false,
         reason: result.refused,
+        failure: "harness",
         protocolVersion: result.negotiated.protocolVersion,
         authMethods: result.negotiated.authMethods,
         agent: result.negotiated.agent,
@@ -230,8 +254,52 @@ export async function probeHarness(
       capabilities: advertisedOptions(result.created),
     };
   } catch (cause) {
-    return { ok: false, reason: reasonFor(cause, input.command), ...EMPTY };
+    return failedWith(cause, input.command);
   } finally {
     kill();
   }
+}
+
+/** The test run's question: as small as a prompt can be and still need the provider to answer. */
+const TURN_SYSTEM = "This is a connection check from SoloW. Answer in one word.";
+const TURN_PROMPT = "Reply with the single word: ready";
+
+/**
+ * Follow a probe that passed with one real turn — the guided setup's test run (roadmap E1).
+ *
+ * For Claude Code a passed probe means only that the binary started: stream-json has no
+ * handshake, and the credential is not used until the first prompt. So a mistyped token or a
+ * revoked key passed, and the setup would have congratulated someone whose first Task was going to
+ * fail. One print turn through `explainWithHarness` — the same binary, environment and model a run
+ * gets, in the mode that edits nothing — is the cheapest thing that makes the provider look at
+ * the credential. It costs a handful of tokens, which is why it is asked for, never implied.
+ *
+ * Only for the protocol that can be prompted outside a run. An ACP probe has already gone as far
+ * as `session/new`; it says `answered: false` rather than pretending it went further.
+ */
+export async function answerProbeTurn(
+  executor: Executor,
+  probed: HarnessProbeResult,
+  input: Omit<HarnessExplainInput, "system" | "prompt">,
+): Promise<HarnessProbeResult> {
+  if (!probed.ok || input.protocol !== "claude_code_stream_json") {
+    return { ...probed, answered: false };
+  }
+  const answer = await explainWithHarness(executor, {
+    ...input,
+    system: TURN_SYSTEM,
+    prompt: TURN_PROMPT,
+  });
+  if (answer.ok) return { ...probed, answered: true };
+
+  const reason = answer.reason ?? "the harness did not answer";
+  const failure: HarnessProbeFailure =
+    answer.failure === "credential"
+      ? "credential"
+      : detectFailureSignal(reason).quotaExhausted
+        ? "quota"
+        : isMissing(reason)
+          ? "missing"
+          : "harness";
+  return { ...probed, ok: false, reason, failure, answered: false };
 }

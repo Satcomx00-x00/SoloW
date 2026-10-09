@@ -3,7 +3,7 @@
 import { FolderGit2, Inbox, Table2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { WorkspaceSetupCard } from "@/components/features/workspace/workspace-setup-card";
+import { GuidedSetup } from "@/components/features/workspace/guided-setup";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,9 +32,9 @@ export function ProjectsHub() {
   /*
    * A Workspace that cannot run anything yet has a more urgent story than "no projects": with no
    * credential and no executor, adopting a project would only move the disappointment later. The
-   * checklist takes the top of the page until it is satisfied, and the centred empty state below
-   * gives up its vertical centring while it is there — two things fighting for the middle of a
-   * screen read as neither being the point.
+   * guided setup takes the top of the page until it is satisfied, and the centred empty state
+   * below gives up its vertical centring while it is there — two things fighting for the middle
+   * of a screen read as neither being the point.
    */
   const setup = trpc.workspace.setup.useQuery();
   const needsSetup = setup.data !== undefined && !setup.data.ready;
@@ -60,7 +60,7 @@ export function ProjectsHub() {
             : "flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
         }
       >
-        <WorkspaceSetupCard />
+        <GuidedSetup />
         <div className="flex flex-col items-center gap-3 p-8 text-center">
           <FolderGit2 aria-hidden className="size-9 text-muted-foreground/40" />
           <h1 className="font-semibold text-base">Start with a project</h1>
@@ -92,7 +92,7 @@ export function ProjectsHub() {
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-5 px-6 py-6">
-      <WorkspaceSetupCard />
+      <GuidedSetup />
       <header className="flex items-end justify-between gap-3">
         <div className="space-y-1">
           <h1 className="font-semibold text-lg tracking-[-0.01em]">Projects</h1>

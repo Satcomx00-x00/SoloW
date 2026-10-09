@@ -108,6 +108,8 @@ export interface OrchestratorClient {
   probeHarnessProfile(input: {
     workspaceId: string;
     agentProfileId: string;
+    /** Follow a passing probe with one real prompt — see `harnessProbeRequest.turn`. */
+    turn?: boolean;
   }): Promise<HarnessProbeReport>;
   /**
    * Whether the orchestrator answers, and whether the engine behind it does (FINDINGS F3).
@@ -327,7 +329,11 @@ export const orchestrator: OrchestratorClient = {
     const res = await fetch(new URL("/probe-agent", base), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ticket, agentProfileId: input.agentProfileId }),
+      body: JSON.stringify({
+        ticket,
+        agentProfileId: input.agentProfileId,
+        ...(input.turn ? { turn: true } : {}),
+      }),
     });
     if (!res.ok) {
       throw new Error(`orchestrator rejected probe: ${res.status} ${await res.text()}`);

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { authModeSchema, idSchema } from "./common.js";
+import { executorKindSchema } from "./executor-config.js";
+import { harnessPermissionModeSchema } from "./profile.js";
+import { setSecretInput } from "./secret.js";
 
 /**
  * The Workspace, as something an Owner can see and act on (2026-08-28).
@@ -23,43 +27,146 @@ export const renameWorkspaceInput = z.object({
 export type RenameWorkspaceInput = z.infer<typeof renameWorkspaceInput>;
 
 /**
- * One thing a Workspace needs before it can run anything.
+ * The guided setup's steps, in the order a newcomer meets them (roadmap E1): connect Claude,
+ * choose a repository, try it.
+ *
+ * Three, where there used to be seven Settings errands — a credential, a Harness Profile, an
+ * Executor and the rest — because the person setting up thinks of one thing, "my Claude
+ * account", and every object underneath it is something SoloW can make for them. Those objects
+ * still exist and stay editable in Settings; they are just not the vocabulary of getting started.
+ */
+export const setupStepKeySchema = z.enum(["claude", "repository", "test"]);
+export type SetupStepKey = z.infer<typeof setupStepKeySchema>;
+
+/**
+ * One step, and whether it is done.
  *
  * `done` is derived from the rows that exist, never from a "dismissed" flag: a checklist that
- * remembered being completed would keep saying so after the Secret it was counting got deleted,
- * which is exactly when someone needs to be told otherwise. The cost is that it is a live view
- * of the Workspace rather than a one-time ceremony — which is the more useful thing anyway.
+ * remembered being completed would keep saying so after the credential it was counting got
+ * deleted, which is exactly when someone needs to be told otherwise. The test run is the one step
+ * with something remembered behind it — see `setupVerifiedSchema` for why that memory still
+ * cannot outlive what it tested.
  */
 export const setupStepDto = z.object({
-  key: z.enum([
-    "workspace",
-    "agents",
-    "secret",
-    "agent-profile",
-    "executor",
-    "repository",
-    "core-loop",
-  ]),
+  key: setupStepKeySchema,
   done: z.boolean(),
-  /** What exists, when something does — "2 secrets", "Claude Code, opencode". Empty when not. */
+  /** What exists, when something does — "Claude Code · subscription", "solow, crawler". */
   detail: z.string(),
   /**
-   * Why this step cannot be started yet, or null when it can. A step gated on an earlier one
-   * says so instead of offering an action that would fail — a Harness Profile needs a Secret to
-   * point at, and a button that opens a form with an empty picker is a worse answer than a
-   * sentence naming what is missing.
+   * The earlier step this one waits on, or null when it can start. The test run needs something
+   * to test, and a button that could only fail is a worse answer than naming what is missing.
    */
-  blockedBy: z.string().nullable(),
+  blockedBy: setupStepKeySchema.nullable(),
 });
 export type SetupStepDto = z.infer<typeof setupStepDto>;
 
+/**
+ * The agent a new Task would run with, as the setup describes it: which harness, how it is paid
+ * for, and how much it may do unasked. Chosen by the rule `quickTaskProfiles` applies, so the
+ * setup and a Quick task can never disagree about which one that is.
+ */
+export const setupAgentDto = z.object({
+  harness: z.string(),
+  billing: authModeSchema,
+  permissionMode: harnessPermissionModeSchema,
+});
+export type SetupAgentDto = z.infer<typeof setupAgentDto>;
+
 export const workspaceSetupDto = z.object({
   workspace: workspaceDto,
+  /**
+   * Whether the core loop's kill switch is on. Not a step: it ships on and only matters once
+   * somebody turns it off — and then it matters more than any step, because none of them can be
+   * done until it is back.
+   */
+  coreLoop: z.boolean(),
   steps: z.array(setupStepDto),
-  /** True once every step is done — what the shell reads to stop showing the checklist. */
+  /** Null until a Harness Profile exists. */
+  agent: setupAgentDto.nullable(),
+  /**
+   * Where a new Task runs: the kind of executor it would get, or null when there is none yet — in
+   * which case connecting creates one on this machine, and the setup says so before it does.
+   */
+  executorKind: executorKindSchema.nullable(),
+  /** True once every step is done and the core loop is on — what stops the setup showing. */
   ready: z.boolean(),
 });
 export type WorkspaceSetupDto = z.infer<typeof workspaceSetupDto>;
+
+/**
+ * "Connect Claude": the one question the setup cannot answer for itself.
+ *
+ * The credential goes through `setSecretInput`'s own rule, trimmed first because a token pasted
+ * from a terminal arrives with its newline. Write-only, like every Secret value (Principle IV).
+ */
+export const connectClaudeInput = z.object({
+  billing: authModeSchema,
+  credential: z.string().trim().pipe(setSecretInput.shape.value),
+});
+export type ConnectClaudeInput = z.infer<typeof connectClaudeInput>;
+
+/** What connecting left in place — ids and kinds only; the credential never comes back. */
+export const connectClaudeResultDto = z.object({
+  harnessProfileId: idSchema,
+  executorProfileId: idSchema,
+  executorKind: executorKindSchema,
+  /** False when an executor already existed and was kept: the setup never replaces one. */
+  createdExecutor: z.boolean(),
+  /** Tasks paused on this credential and restarted by replacing it, as `secret.set` does. */
+  resumedTaskCount: z.number().int().nonnegative(),
+});
+export type ConnectClaudeResultDto = z.infer<typeof connectClaudeResultDto>;
+
+/**
+ * Why a test run failed, as a cause the screen can turn into a sentence and a step to go back to
+ * (F18, edge cases) — never the harness's own error text.
+ *
+ * - `not-connected` — nothing to test yet.
+ * - `unreachable` — the orchestrator did not answer the request at all.
+ * - `not-installed` — the harness binary is not on the orchestrator's host.
+ * - `credential` — the provider refused the token or key.
+ * - `quota` — the plan's usage window is spent; the setup is fine and the test can wait.
+ * - `harness` — it started and then failed some other way.
+ */
+export const setupTestProblemSchema = z.enum([
+  "not-connected",
+  "unreachable",
+  "not-installed",
+  "credential",
+  "quota",
+  "harness",
+]);
+export type SetupTestProblem = z.infer<typeof setupTestProblemSchema>;
+
+export const setupTestResultDto = z.object({
+  ok: z.boolean(),
+  problem: setupTestProblemSchema.nullable(),
+  /** The step to go back to, or null when no step can fix it (a spent quota, a stopped server). */
+  fixStep: setupStepKeySchema.nullable(),
+  /** The harness that was tested, by its display name. Null when there was none. */
+  harness: z.string().nullable(),
+  /**
+   * Whether it answered a prompt — the proof that the credential works. False only for a harness
+   * this build cannot prompt outside a run, where starting it and its handshake are all there is.
+   */
+  answered: z.boolean(),
+});
+export type SetupTestResultDto = z.infer<typeof setupTestResultDto>;
+
+/**
+ * A passed test run, remembered (`ui_preference`, under `SETUP_VERIFIED_PREFERENCE_KEY`).
+ *
+ * The one part of the setup that is not a count of rows, because a test run leaves none behind.
+ * It names what it tested — the Profile, and when that Profile's credential was last written — so
+ * it stops counting the moment either changes: a replaced token is an untested token.
+ */
+export const setupVerifiedSchema = z.object({
+  harnessProfileId: idSchema,
+  secretUpdatedAt: z.string(),
+});
+export type SetupVerified = z.infer<typeof setupVerifiedSchema>;
+
+export const SETUP_VERIFIED_PREFERENCE_KEY = "setup-verified";
 
 /**
  * How current the mirror is, as one line a status bar can hold.
