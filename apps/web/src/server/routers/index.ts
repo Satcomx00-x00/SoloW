@@ -16,6 +16,7 @@ import { repositoryRouter } from "./repository.js";
 import { reviewRouter } from "./review.js";
 import { secretRouter } from "./secret.js";
 import { sessionRouter } from "./session.js";
+import { setupRouter } from "./setup.js";
 import { streamRouter } from "./stream.js";
 import { taskRouter } from "./task.js";
 import { workflowRouter } from "./workflow.js";
@@ -40,6 +41,7 @@ export const appRouter = router({
   review: reviewRouter,
   secret: secretRouter,
   session: sessionRouter,
+  setup: setupRouter,
   stream: streamRouter,
   workflow: workflowRouter,
   workspace: workspaceRouter,

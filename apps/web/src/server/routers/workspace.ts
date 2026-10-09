@@ -14,11 +14,11 @@ import {
   workspaceSetupDto,
 } from "@solow/contracts";
 import { workspaceCounts } from "../dal/counts.js";
+import { getWorkspaceSetup } from "../dal/setup.js";
 import {
   getHistoryRetention,
   getSyncStatus,
   getWorkspace,
-  getWorkspaceSetup,
   previewHistoryRetention,
   renameWorkspace,
   requestWorkspaceSync,
@@ -137,7 +137,7 @@ export const workspaceRouter = router({
         tags: ["workspace"],
         protect: true,
         summary:
-          "What this Workspace still needs before it can run anything — a credential, a Harness Profile, an Executor, a Repository and the core loop — derived from what it actually has.",
+          "Where the guided setup stands: whether Claude is connected (a Harness Profile with its credential, and an executor for it), whether a Repository is connected, and whether a test run has passed for the current credential — plus whether the core loop is on. Derived from what the Workspace actually has.",
       },
     })
     .input(workspaceDto.pick({}).optional())

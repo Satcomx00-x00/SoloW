@@ -18248,6 +18248,18 @@
                         "models",
                         "modes"
                       ]
+                    },
+                    "failure": {
+                      "type": "string",
+                      "enum": [
+                        "missing",
+                        "credential",
+                        "quota",
+                        "harness"
+                      ]
+                    },
+                    "answered": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -40905,7 +40917,7 @@
     "/workspace.setup": {
       "get": {
         "operationId": "workspace-setup",
-        "summary": "What this Workspace still needs before it can run anything — a credential, a Harness Profile, an Executor, a Repository and the core loop — derived from what it actually has.",
+        "summary": "Where the guided setup stands: whether Claude is connected (a Harness Profile with its credential, and an executor for it), whether a Repository is connected, and whether a test run has passed for the current credential — plus whether the core loop is on. Derived from what the Workspace actually has.",
         "tags": [
           "workspace"
         ],
@@ -40941,6 +40953,9 @@
                         "createdAt"
                       ]
                     },
+                    "coreLoop": {
+                      "type": "boolean"
+                    },
                     "steps": {
                       "type": "array",
                       "items": {
@@ -40949,13 +40964,9 @@
                           "key": {
                             "type": "string",
                             "enum": [
-                              "workspace",
-                              "agents",
-                              "secret",
-                              "agent-profile",
-                              "executor",
+                              "claude",
                               "repository",
-                              "core-loop"
+                              "test"
                             ]
                           },
                           "done": {
@@ -40966,7 +40977,13 @@
                           },
                           "blockedBy": {
                             "type": "string",
-                            "nullable": true
+                            "nullable": true,
+                            "enum": [
+                              "claude",
+                              "repository",
+                              "test",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -40977,13 +40994,56 @@
                         ]
                       }
                     },
+                    "agent": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "harness": {
+                          "type": "string"
+                        },
+                        "billing": {
+                          "type": "string",
+                          "enum": [
+                            "subscription",
+                            "api_key"
+                          ]
+                        },
+                        "permissionMode": {
+                          "type": "string",
+                          "enum": [
+                            "acceptEdits",
+                            "plan",
+                            "bypassPermissions"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "harness",
+                        "billing",
+                        "permissionMode"
+                      ]
+                    },
+                    "executorKind": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "local",
+                        "docker",
+                        "ssh",
+                        "cloud",
+                        null
+                      ]
+                    },
                     "ready": {
                       "type": "boolean"
                     }
                   },
                   "required": [
                     "workspace",
+                    "coreLoop",
                     "steps",
+                    "agent",
+                    "executorKind",
                     "ready"
                   ]
                 }

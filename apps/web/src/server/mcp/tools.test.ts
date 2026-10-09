@@ -73,6 +73,15 @@ describe("the MCP surface", () => {
     expect(exposed.some((n) => n.startsWith("stream_"))).toBe(false);
   });
 
+  it("does not let a token plant a credential or spend tokens through the guided setup", () => {
+    // `setup.connectClaude` stores a Secret — the `secret` rule with a Profile attached — and
+    // `setup.test` prompts a harness on the Owner's credential. Both are a person's to do.
+    for (const withheld of ["setup_connectClaude", "setup_test"]) {
+      expect(names()).not.toContain(withheld);
+      expect(findMcpTool(withheld)).toBeUndefined();
+    }
+  });
+
   it("does not let a token erase evidence, finish its own Task or empty the Workspace", () => {
     const exposed = names();
     for (const withheld of [

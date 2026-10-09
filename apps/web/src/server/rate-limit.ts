@@ -29,6 +29,11 @@ export const RATE_LIMITS = {
    */
   "workspace.setHistoryRetention": { limit: 10, windowMs: 60_000 },
   "workspace.previewHistoryRetention": { limit: 30, windowMs: 60_000 },
+  /*
+   * The setup's test run is a real prompt on the Owner's own credential. A person presses it a
+   * few times while fixing a token; a client stuck in a retry loop would otherwise spend tokens.
+   */
+  "setup.test": { limit: 10, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitedProcedure = keyof typeof RATE_LIMITS;
