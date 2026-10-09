@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { TaskErrorCode, type WorkflowStepDto } from "@solow/contracts";
+import { type ExecutorKind, TaskErrorCode, type WorkflowStepDto } from "@solow/contracts";
 import { primaryTaskRepository, taskCheckoutBranch } from "@solow/core";
 import { decryptForScmSync, loadTaskWorkflowRun } from "@solow/db";
 import { captureException, logStateTransition } from "@solow/observability";
@@ -174,6 +174,78 @@ export function executorBindPaths(
     );
   }
   return [...new Set(paths)];
+}
+
+/**
+ * Does this Task get a repository of its own (issue #96 round 2, Principle II)?
+ *
+ * True whenever the harness runs somewhere other than the orchestrator's own host — today, in a
+ * container. Everything the container can reach is a bind mount, and a repository two Tasks
+ * share is therefore a repository each of them can read and write everything in: a reviewer
+ * proved, on live containers, that Task A could read Task B's committed *and* merely staged
+ * secrets out of it, rewrite the result branch B would be reviewed on, deregister B's worktree
+ * and read B's private worktree path out of `.git/worktrees`. None of those is a Docker defect
+ * and none is fixable in the mount set alone — a worktree's `.git` is a *file* pointing into
+ * its parent's `.git/worktrees/`, so a Task that shares a parent shares everything in it.
+ *
+ * A local run keeps the shared repository. Two local Tasks already run as one uid on one
+ * filesystem, so a clone apiece would cost a copy of the repository to buy nothing: F07 says
+ * plainly which isolation the Local Executor provides and which it does not.
+ */
+export function taskOwnsClone(kind: ExecutorKind): boolean {
+  return kind !== "local";
+}
+
+/**
+ * Where a Task's executor works: its jail, the directories it is handed and the stores beside
+ * them — everything about the placement that follows from the Task alone.
+ *
+ * One function for the run and for the Task page's terminal (`ws/terminal.ts`), which opens its
+ * own container for a Docker Task and has to see exactly what the run's sees: not another Task's
+ * worktree, and not less than the conversation the run left to resume. A second copy of these
+ * rules in the terminal would be a mount set that drifts from the run's the first time either
+ * changes.
+ */
+export function taskExecutorPlacement(
+  deps: Pick<TaskRunDeps, "worktreeRoot" | "repoCacheRoot">,
+  taskId: string,
+  repositories: readonly TaskRepositoryBinding[],
+  kind: ExecutorKind,
+): Pick<
+  ExecutorFactoryOpts,
+  | "jailRoot"
+  | "worktreeRoot"
+  | "repoCacheRoot"
+  | "bindPaths"
+  | "transcriptStore"
+  | "checkpointStore"
+> {
+  return {
+    /*
+     * This Task's own worktree directory, not the root that holds every Task's.
+     *
+     * The jail is the driver's host-side path check and the container's `HOME`, so rooting it at
+     * `SOLOW_WORKTREE_ROOT` gave the jailed `fs` API — the one API that is supposed to enforce
+     * the boundary — a view of every other Task's worktree in the deployment, across Workspaces.
+     * That is Principle II, and no acceptance criterion buys it back.
+     *
+     * Naming a directory that does not exist yet is safe on both drivers: the Docker driver
+     * `mkdir -p`s every bind source before `docker run`, and `git worktree add` writes into an
+     * empty directory quite happily. Under `claude --worktree` the harness makes its own worktree
+     * inside the repository and never touches this path at all; that worktree stays reachable
+     * because the repository it lives in is mounted, which is how it was reachable before.
+     */
+    jailRoot: worktreePath(deps.worktreeRoot, taskId),
+    worktreeRoot: deps.worktreeRoot,
+    repoCacheRoot: deps.repoCacheRoot,
+    bindPaths: executorBindPaths(deps, taskId, repositories, taskOwnsClone(kind)),
+    // The harness's transcripts, kept on the host so a containerised Task can resume its
+    // conversation (history retention); the local driver ignores it — its `$HOME` is the host's.
+    transcriptStore: harnessTranscriptsPath(deps.worktreeRoot, taskId),
+    // Bound at its own path so the hook a Step's launch settings name is the file the container
+    // runs; the local driver shares the filesystem and ignores it.
+    checkpointStore: checkpointStorePath(deps.worktreeRoot, taskId),
+  };
 }
 
 /**
@@ -378,23 +450,7 @@ export async function resolveEntry(scope: RunScope, decidedReview: DecidedReview
     return terminal({ taskId, result: "failed" as const });
   }
 
-  /**
-   * Does this Task get a repository of its own (issue #96 round 2, Principle II)?
-   *
-   * True whenever the harness runs somewhere other than the orchestrator's own host — today, in a
-   * container. Everything the container can reach is a bind mount, and a repository two Tasks
-   * share is therefore a repository each of them can read and write everything in: a reviewer
-   * proved, on live containers, that Task A could read Task B's committed *and* merely staged
-   * secrets out of it, rewrite the result branch B would be reviewed on, deregister B's worktree
-   * and read B's private worktree path out of `.git/worktrees`. None of those is a Docker defect
-   * and none is fixable in the mount set alone — a worktree's `.git` is a *file* pointing into
-   * its parent's `.git/worktrees/`, so a Task that shares a parent shares everything in it.
-   *
-   * A local run keeps the shared repository. Two local Tasks already run as one uid on one
-   * filesystem, so a clone apiece would cost a copy of the repository to buy nothing: F07 says
-   * plainly which isolation the Local Executor provides and which it does not.
-   */
-  const ownClone = ctx.executorProfile.config.kind !== "local";
+  const ownClone = taskOwnsClone(ctx.executorProfile.config.kind);
 
   /**
    * The executor this Task runs on, built from the Task's own Executor Profile (issue #96).
@@ -411,30 +467,7 @@ export async function resolveEntry(scope: RunScope, decidedReview: DecidedReview
    */
   const executorOpts: ExecutorFactoryOpts = {
     ids: { workspaceId, taskId, sessionId },
-    /*
-     * This Task's own worktree directory, not the root that holds every Task's.
-     *
-     * The jail is the driver's host-side path check and the container's `HOME`, so rooting it at
-     * `SOLOW_WORKTREE_ROOT` gave the jailed `fs` API — the one API that is supposed to enforce
-     * the boundary — a view of every other Task's worktree in the deployment, across Workspaces.
-     * That is Principle II, and no acceptance criterion buys it back.
-     *
-     * Naming a directory that does not exist yet is safe on both drivers: the Docker driver
-     * `mkdir -p`s every bind source before `docker run`, and `git worktree add` writes into an
-     * empty directory quite happily. Under `claude --worktree` the harness makes its own worktree
-     * inside the repository and never touches this path at all; that worktree stays reachable
-     * because the repository it lives in is mounted, which is how it was reachable before.
-     */
-    jailRoot: worktreePath(deps.worktreeRoot, taskId),
-    worktreeRoot: deps.worktreeRoot,
-    repoCacheRoot: deps.repoCacheRoot,
-    bindPaths: executorBindPaths(deps, taskId, ctx.repositories, ownClone),
-    // The harness's transcripts, kept on the host so a containerised Task can resume its
-    // conversation (history retention); the local driver ignores it — its `$HOME` is the host's.
-    transcriptStore: harnessTranscriptsPath(deps.worktreeRoot, taskId),
-    // Bound at its own path so the hook a Step's launch settings name is the file the container
-    // runs; the local driver shares the filesystem and ignores it.
-    checkpointStore,
+    ...taskExecutorPlacement(deps, taskId, ctx.repositories, ctx.executorProfile.config.kind),
     // What this run is going to spawn, probed once by the preflight so a missing harness binary
     // throws on the line the runners already guard rather than arriving as an exit 127.
     //
