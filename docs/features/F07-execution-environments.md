@@ -96,7 +96,8 @@ executor is documented, and presented, as **for trusted agents only**.
 The Docker driver spawns the harness's bare command inside `config.image`, so a container is only
 as useful as an image with a harness in it. SoloW's is `docker/executor/Dockerfile`:
 
-- **Contents.** Debian 13 slim, `git` and `ca-certificates`, Claude Code and opencode as their
+- **Contents.** Debian 13 slim, `git`, `ca-certificates` and `procps` (the driver stops a harness
+  by exec'ing a `kill` binary, which a slim Debian lacks), Claude Code and opencode as their
   native executables in `/usr/local/bin`, and nothing else — no Node, no npm, no credentials. The
   versions are pinned in the file (`ARG CLAUDE_CODE_VERSION`, `ARG OPENCODE_VERSION`); opencode's
   must equal the orchestrator's `@opencode/cli` dependency and the catalog's `minVersion`, which

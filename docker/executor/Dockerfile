@@ -58,11 +58,15 @@ LABEL org.opencontainers.image.title="solow-executor" \
       solow.harness.claude_code="${CLAUDE_CODE_VERSION}" \
       solow.harness.opencode="${OPENCODE_VERSION}"
 
+# `procps` for its `kill` binary: the driver stops a harness with `docker exec <ctr> kill -s TERM
+# <pid>`, which needs a real executable, and a slim Debian has only the shell builtin — a stop
+# that silently did nothing. The preflight cannot see this (`command -v kill` finds the builtin).
+#
 # Not version-pinned (DL3008): the base tag fixes the Debian release, and pinning a package
 # version inside it fails the build as soon as a security update replaces that version upstream.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git \
+    && apt-get install -y --no-install-recommends ca-certificates git procps \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 solow \
     && useradd --uid 1000 --gid solow --create-home --home-dir /home/solow --shell /bin/sh solow

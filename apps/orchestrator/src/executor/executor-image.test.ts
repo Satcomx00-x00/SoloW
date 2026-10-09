@@ -59,4 +59,10 @@ describe("the executor image", () => {
     expect(REQUIRED_CONTAINER_UTILITIES).toContain("git");
     expect(DOCKERFILE).toMatch(/apt-get install [^\n]*\bgit\b/);
   });
+
+  it("adds a kill binary, which the driver execs to stop a harness and the preflight cannot see", () => {
+    // `command -v kill` answers with the shell builtin, so an image without the binary passes the
+    // preflight and then cannot stop anything.
+    expect(DOCKERFILE).toMatch(/apt-get install [^\n]*\bprocps\b/);
+  });
 });
