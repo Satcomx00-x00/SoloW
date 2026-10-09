@@ -88,8 +88,8 @@ executor is documented, and presented, as **for trusted agents only**.
   executor the Owner made, or a local default kept beside an existing Docker executor, is never
   overruled. Server and screen apply one rule, `setupExecutorPlan` in `@solow/contracts`, so the
   screen says where Claude will work before Connect is pressed: in the container, or on this
-  machine under the host-run warning, with the command that builds the image when that is all
-  that is missing.
+  machine under the host-run warning — and, when the image is all that is missing, a button that
+  builds it (below).
 
 ### The executor image
 
@@ -106,23 +106,45 @@ as useful as an image with a harness in it. SoloW's is `docker/executor/Dockerfi
 - **The user.** `USER 1000:1000`, named `solow`. The driver always passes `--user` with the
   orchestrator's own uid:gid anyway, so the harnesses are world-executable, and `HOME` is left to
   the driver's tmpfs: the image declares none, because a declared one would win over it.
-- **Building it.** `make executor-image` in a checkout, or `npx @satcomx00-x00/solow
+- **Building it from the setup.** Where Docker answers and the image is all that is missing, the
+  guided setup offers "Build the isolated environment" (and, when the test fails on the image,
+  "Rebuild the image"). The orchestrator runs the build (`executor/image-build.ts`), started by
+  `POST /executor-image/build` and read by `POST /executor-image`, both signed like the
+  availability check and read through `profile.executor.imageBuild` / `buildImage`. The start
+  answers at once and the build carries on without the request; one runs at a time, a second
+  press joins it, and where it is — state, the newest forty lines, a failure in words — is held in
+  memory, so a restart forgets it and the button is offered again (the layers already built are
+  Docker's cache, not SoloW's, and survive). The screen polls every two seconds while one runs
+  and never otherwise, shows the elapsed time and Docker's newest line, and on success asks the
+  availability check again, which is what moves the plan to the container. A build is stopped
+  after thirty minutes. The Dockerfile is imported as text, so `docker/executor/Dockerfile` stays
+  its one home: Bun reads it in a checkout, and `bun build` inlines it into the published
+  orchestrator. Unlike the command below, this build is not followed by a version check: the
+  setup's test, which runs the run's own preflight in a container of the image, is that check.
+- **Building it by hand.** `make executor-image` in a checkout, or `npx @satcomx00-x00/solow
   executor-image` for an npm install — the same code (`packages/cli/bin/solow.mjs`), reading the
   same Dockerfile (shipped in the package as `dist/executor/Dockerfile`). It pipes the file to
   `docker build -`, so there is no build context to leak from, tags `solow-executor:local`, then
   runs `claude --version` and `opencode --version` in it as the invoking uid with a tmpfs `HOME`,
   and only then calls it ready. `make smoke-docker SMOKE_DOCKER_IMAGE=solow-executor:local` puts it
-  through the driver's own preflight and acceptance checks.
+  through the driver's own preflight and acceptance checks. The setup shows both commands beside
+  its button, for whoever would rather watch the whole log.
 - **Naming another image.** `SOLOW_EXECUTOR_IMAGE` on the orchestrator names the image the setup
-  looks for (and the build tags, when set for it too). It is looked up, never pulled: a local tag
-  has no registry, and the setup chooses a container only when the daemon already has the image.
-- **Not yet.** No registry publishes it; every machine builds its own.
+  looks for and builds (and the command tags, when set for it too). It is looked up, never pulled:
+  a local tag has no registry, and the setup chooses a container only when the daemon already has
+  the image.
+- **Not published, deliberately.** No registry carries it, and none should: the image contains
+  Claude Code, whose package states "© Anthropic PBC. All rights reserved. Use is subject to the
+  Legal Agreements" (its `LICENSE.md`; `npm view @anthropic-ai/claude-code license` answers "SEE
+  LICENSE IN README.md"). To our understanding nothing there grants redistribution, and a public
+  image would be redistributing it — this is a reading, not legal advice. Each machine builds its
+  own from npm instead, which is what the setup's button makes a one-click step.
 - **The setup's test runs in it.** The test asks the orchestrator to probe the executor a new
   Task would get (`executorProfileId` on `POST /probe-agent`), so a setup that put Claude in a
   container is tested in a one-shot container of that image — see "Launches that are not a
   Task's run" below. A missing or unusable image fails the test as "SoloW couldn't start the
   isolated container", and a harness missing from the image says so rather than asking the Owner
-  to install Claude on the host.
+  to install Claude on the host; both offer to rebuild the image there.
 - **Never-ask on the local executor is a deliberate choice.** Wherever a Task is created or a batch
   launched, the pairing of a `bypassPermissions` Harness Profile with a `local` Executor shows an
   alert ("This run is not isolated") before the Owner confirms. There is no server-side refusal:

@@ -382,7 +382,9 @@ audit.
 The web app never asks Docker anything itself, either. Whether the daemon answers, and whether it
 already has the executor image (`docker/executor/Dockerfile`, built by `make executor-image`), is
 the orchestrator's `POST /executor-availability` (`executor/availability.ts`), which the web app
-reads through `profile.executor.dockerAvailability`. The guided setup decides from that answer
+reads through `profile.executor.dockerAvailability`. Building that image from the guided setup is
+the orchestrator's too (`executor/image-build.ts`, `POST /executor-image/build`): the web app only
+starts it and asks how it is going. The guided setup decides from that answer
 whether "Connect Claude" makes a Docker executor or a local one (`setupExecutorPlan`, and
 `connectClaude` in `apps/web/src/server/dal/setup.ts`). A Task that runs in a container needs that
 image or one like it, because the driver spawns the harness's bare command inside it. See
