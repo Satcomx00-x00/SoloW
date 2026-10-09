@@ -20,11 +20,15 @@ export type DockerAvailabilityRequest = z.infer<typeof dockerAvailabilityRequest
 
 /**
  * The image the guided setup runs Claude in, unless the operator names another with
- * `SOLOW_EXECUTOR_IMAGE` on the orchestrator. Built from `docker/executor/Dockerfile` by
- * `make executor-image` or `solow executor-image`, which tag it with this name.
+ * `SOLOW_EXECUTOR_IMAGE` on the orchestrator. Built from `docker/executor/Dockerfile` by the
+ * guided setup's own build (`POST /executor-image/build`), `make executor-image` or
+ * `solow executor-image`, which tag it with this name.
  *
  * A local tag, not a registry one: nothing pulls it, so a fresh machine has it only once someone
  * built it there — which is why the setup asks the daemon whether it exists before choosing it.
+ * It is not published, and that is deliberate: the image carries Claude Code, whose package is,
+ * to our understanding, Anthropic's proprietary software with no grant to redistribute it, so a
+ * public image would be redistributing it. Each machine builds its own instead.
  * `packages/cli/bin/solow.mjs` cannot import this file and spells the same name; a test there
  * keeps the two in step.
  */
@@ -55,6 +59,37 @@ export function usableExecutorImage(
 ): string | null {
   return report?.available && report.executorImage.present ? report.executorImage.name : null;
 }
+
+/**
+ * `POST /executor-image` (where the build is) and `POST /executor-image/build` (start one) on the
+ * orchestrator: the same signed Workspace and nothing else, since the image belongs to the machine.
+ */
+export const executorImageBuildRequest = dockerAvailabilityRequest;
+export type ExecutorImageBuildRequest = z.infer<typeof executorImageBuildRequest>;
+
+/**
+ * Where the orchestrator's build of the executor image is, so the guided setup can build it in one
+ * click instead of sending a newcomer to a terminal.
+ *
+ * One build per orchestrator, held in memory: `idle` until one is started, then `building` and
+ * `succeeded` or `failed`. A restart forgets it, which loses nothing — the image either exists by
+ * then, and the availability check says so, or it does not and the build is started again.
+ * `output` is the newest lines Docker printed, oldest first and bounded, so a failure can show
+ * what went wrong without the whole log crossing the wire every poll. `reason` is the failure in
+ * plain words, null otherwise.
+ */
+export const executorImageBuildState = z.enum(["idle", "building", "succeeded", "failed"]);
+export type ExecutorImageBuildState = z.infer<typeof executorImageBuildState>;
+
+export const executorImageBuildStatus = z.object({
+  image: z.string().min(1),
+  state: executorImageBuildState,
+  startedAt: z.string().datetime().nullable(),
+  finishedAt: z.string().datetime().nullable(),
+  output: z.array(z.string()),
+  reason: z.string().nullable(),
+});
+export type ExecutorImageBuildStatus = z.infer<typeof executorImageBuildStatus>;
 
 /** The kind a new Executor Profile starts as: the container when there is one, else the host. */
 export function preferredExecutorKind(dockerAvailable: boolean): ExecutorKind {

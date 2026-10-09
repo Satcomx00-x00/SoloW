@@ -5,6 +5,7 @@ import {
   dockerAvailabilityRequest,
   type ExecutorConfig,
   type ExecutorKind,
+  executorImageBuildRequest,
   type HarnessProbeFailure,
   harnessExplainRequest,
   harnessProbeRequest,
@@ -27,6 +28,7 @@ import {
   type OutOfBandOpts,
   openOutOfBandExecutor,
 } from "./executor/factory.js";
+import { createExecutorImageBuilder, type ExecutorImageBuilder } from "./executor/image-build.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
@@ -101,6 +103,8 @@ export interface WsServerDeps {
     profile: { config: ExecutorConfig } | null,
     opts: OutOfBandLaunch,
   ) => Promise<OutOfBandExecutor>;
+  /** The guided setup's build of the executor image — one per process (`executor/image-build.ts`). */
+  imageBuild: ExecutorImageBuilder;
 }
 
 /** What a route says about its own launch; the deployment fills in the rest (`outOfBand`). */
@@ -126,6 +130,7 @@ function defaultWsDeps(): WsServerDeps {
         repoCacheRoot: orchestratorEnv().SOLOW_REPO_CACHE_ROOT,
         host: dockerHost,
       }),
+    imageBuild: createExecutorImageBuilder({ host: dockerHost }),
   };
 }
 
@@ -378,6 +383,32 @@ export async function handleDockerAvailabilityPost(
   const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
   if (!verified.ok) return new Response(verified.error, { status: 401 });
   return Response.json(await probeDockerAvailability(deps.dockerHost));
+}
+
+/**
+ * `POST /executor-image` — where the executor image's build is; `POST /executor-image/build` —
+ * start one, or answer with the one already running (roadmap B4, the guided setup's one click).
+ *
+ * Signed like `/executor-availability`, and for more reason: starting a build spends this host's
+ * disk, network and minutes. The start answers at once and the build carries on detached from it,
+ * so no request here waits on Docker.
+ */
+export async function handleExecutorImagePost(
+  req: Request,
+  deps: Pick<WsServerDeps, "now" | "streamSecret" | "imageBuild">,
+  action: "status" | "start",
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = executorImageBuildRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  return Response.json(action === "start" ? deps.imageBuild.start() : deps.imageBuild.status());
 }
 
 /**
@@ -879,6 +910,10 @@ export function startWebSocketServer(
       if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
       if (pathname === "/executor-availability" && req.method === "POST")
         return handleDockerAvailabilityPost(req, deps);
+      if (pathname === "/executor-image" && req.method === "POST")
+        return handleExecutorImagePost(req, deps, "status");
+      if (pathname === "/executor-image/build" && req.method === "POST")
+        return handleExecutorImagePost(req, deps, "start");
       if (pathname === "/explain" && req.method === "POST") return handleExplainPost(req, deps);
       // The Task page's terminal: its own socket, its own ticket check (see `ws/terminal.ts`).
       if (pathname === "/terminal") {
