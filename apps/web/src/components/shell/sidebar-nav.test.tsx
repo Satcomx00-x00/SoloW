@@ -401,6 +401,22 @@ describe("Breadcrumb", () => {
     );
   });
 
+  it("names a Project's overview once per level, though two of its crumbs share an address", async () => {
+    // The overview is the Planning section, so the Project and Planning crumbs both link to it.
+    const logged: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => logged.push(args);
+    try {
+      pathname = "/projects/proj-1";
+      renderWithTrpc(<HeaderBar />, handlers());
+
+      await waitFor(() => expect(crumbs()).toEqual(["Projects", "Features ToDeb", "Planning"]));
+      expect(logged.filter((args) => String(args[0]).includes("same key"))).toEqual([]);
+    } finally {
+      console.error = original;
+    }
+  });
+
   it("places a Task under its Project's board, ending on the Task's title", async () => {
     pathname = "/task/t1";
     renderWithTrpc(
