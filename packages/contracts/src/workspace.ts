@@ -88,6 +88,12 @@ export const workspaceSetupDto = z.object({
    * which case connecting creates one on this machine, and the setup says so before it does.
    */
   executorKind: executorKindSchema.nullable(),
+  /**
+   * Whether that executor is the local one the setup made when there was nothing else, in a
+   * Workspace with no container executor — the one case where connecting again moves Claude into
+   * the isolated container once its image exists (`setupExecutorPlan`).
+   */
+  executorReplaceable: z.boolean(),
   /** True once every step is done and the core loop is on — what stops the setup showing. */
   ready: z.boolean(),
 });
@@ -110,7 +116,11 @@ export const connectClaudeResultDto = z.object({
   harnessProfileId: idSchema,
   executorProfileId: idSchema,
   executorKind: executorKindSchema,
-  /** False when an executor already existed and was kept: the setup never replaces one. */
+  /**
+   * False when an executor already existed and was kept. True when there was none, and when the
+   * setup's own local executor was succeeded by the isolated one — which then becomes the default
+   * while the local one stays, unchanged, in Settings.
+   */
   createdExecutor: z.boolean(),
   /** Tasks paused on this credential and restarted by replacing it, as `secret.set` does. */
   resumedTaskCount: z.number().int().nonnegative(),

@@ -86,6 +86,14 @@ BIN="$WORK/node_modules/.bin/solow"
 echo "==> solow --version"
 "$BIN" --version
 
+# `solow executor-image` builds from the package's own copy; without it an npx install has no way
+# to the isolated executor. Building it here would need a daemon and minutes, so presence only.
+echo "==> the executor image's Dockerfile ships"
+[ -f "$WORK/node_modules/@satcomx00-x00/solow/dist/executor/Dockerfile" ] || {
+    echo "smoke-tarball: dist/executor/Dockerfile is missing from the package." >&2
+    exit 1
+}
+
 # Boot the installed CLI and wait for its own "up" line. Called twice below, so the stack is a
 # function: once the way a user runs it, once with sign-in switched on. `$@` is the environment
 # for the run, the way `env` takes it, so a caller can say what differs and nothing else.

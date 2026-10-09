@@ -4,7 +4,7 @@
 SHELL := bash
 .DEFAULT_GOAL := help
 .PHONY: help install clean build lint format typecheck test test-web smoke smoke-tarball smoke-docker \
-	test-docker-live e2e e2e-critical control-check \
+	test-docker-live executor-image e2e e2e-critical control-check \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
 	dev-orchestrator update db-generate db-migrate db-bootstrap backup restore openapi openapi-check \
 	store-sync store-check
@@ -73,6 +73,15 @@ test-docker-live: ## Run the Executor contract against a live daemon (SMOKE_DOCK
 	else \
 		echo "test-docker-live SKIPPED — no reachable Docker daemon (SMOKE_DOCKER_REQUIRED=1 forbids this skip)."; \
 	fi
+
+# The image the guided setup runs Claude in, from `docker/executor/Dockerfile`, checked afterwards
+# by running both harnesses as your uid with a tmpfs HOME, the way a Task runs them. The same code
+# as `npx @satcomx00-x00/solow executor-image`, so the two cannot build different things. Tagged
+# `solow-executor:local`, or `$SOLOW_EXECUTOR_IMAGE` — the orchestrator reads the same variable to
+# decide which image to look for. Run `make smoke-docker SMOKE_DOCKER_IMAGE=solow-executor:local`
+# afterwards to put it through the driver's own preflight.
+executor-image: ## Build the Docker executor's image with Claude Code and opencode (solow-executor:local)
+	bun packages/cli/bin/solow.mjs executor-image
 
 e2e: ## Run the Playwright E2E suite (boots the SPA + an orchestrator harness)
 	bunx playwright test

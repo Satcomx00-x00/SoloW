@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { HarnessProbeReport } from "@solow/contracts";
+import type { DockerAvailabilityReport, HarnessProbeReport } from "@solow/contracts";
 import {
   decryptForHarnessRun,
   executorProfile,
@@ -43,6 +43,28 @@ async function bareWorkspace(name = "Bare") {
 
 async function connect(workspaceId: string, billing: "subscription" | "api_key", token: string) {
   const result = await connectClaude(ctxFor(db, workspaceId), { billing, credential: token });
+  if (!result.ok) throw new Error(`connect failed: ${result.error}`);
+  return result.data.result;
+}
+
+const IMAGE = "solow-executor:local";
+
+/** What the orchestrator says about Docker: there, with or without the executor image. */
+const dockerWith = (present: boolean) => async (): Promise<DockerAvailabilityReport | null> => ({
+  available: true,
+  reason: null,
+  executorImage: { name: IMAGE, present },
+});
+
+async function connectWith(
+  workspaceId: string,
+  availability: () => Promise<DockerAvailabilityReport | null>,
+) {
+  const result = await connectClaude(
+    ctxFor(db, workspaceId),
+    { billing: "subscription", credential: "sk-ant-oat01-token" },
+    availability,
+  );
   if (!result.ok) throw new Error(`connect failed: ${result.error}`);
   return result.data.result;
 }
@@ -189,6 +211,100 @@ describe("connectClaude", () => {
     const { executors } = await rows(id);
     expect(executors.map((e) => e.name).sort()).toEqual(["My laptop", "Sandbox"]);
     expect(executors.find((e) => e.id === local?.id)?.config).toEqual({ kind: "local", env: {} });
+  });
+
+  it("puts Claude in the isolated container when Docker already has the image", async () => {
+    const id = await bareWorkspace();
+
+    const result = await connectWith(id, dockerWith(true));
+
+    expect(result.createdExecutor).toBe(true);
+    expect(result.executorKind).toBe("docker");
+    const { executors } = await rows(id);
+    expect(executors).toHaveLength(1);
+    expect(executors[0]?.config).toEqual({ kind: "docker", image: IMAGE, mounts: [], env: {} });
+    const setup = await setupOf(id);
+    expect(setup.executorKind).toBe("docker");
+    expect(setup.executorReplaceable).toBe(false);
+  });
+
+  it("stays on this machine when the image is missing, Docker is absent, or nobody answered", async () => {
+    for (const availability of [
+      dockerWith(false),
+      async () => ({
+        available: false,
+        reason: "docker: not found",
+        executorImage: { name: IMAGE, present: false },
+      }),
+      async () => null,
+      async () => {
+        throw new Error("orchestrator down");
+      },
+    ]) {
+      const id = await bareWorkspace();
+      const result = await connectWith(id, availability);
+      expect(result.executorKind).toBe("local");
+    }
+  });
+
+  it("moves the setup's own local executor into the container once the image is built, once", async () => {
+    const id = await bareWorkspace();
+    const first = await connectWith(id, dockerWith(false));
+    expect((await setupOf(id)).executorReplaceable).toBe(true);
+
+    const second = await connectWith(id, dockerWith(true));
+    const third = await connectWith(id, dockerWith(true));
+
+    expect(second.createdExecutor).toBe(true);
+    expect(second.executorKind).toBe("docker");
+    expect(third.createdExecutor).toBe(false);
+    expect(third.executorProfileId).toBe(second.executorProfileId);
+    const { executors } = await rows(id);
+    // The local one stays where Settings shows it, unchanged; it is no longer the default.
+    expect(executors.map((e) => e.kind).sort()).toEqual(["docker", "local"]);
+    expect(executors.find((e) => e.id === first.executorProfileId)?.config).toEqual({
+      kind: "local",
+      env: {},
+    });
+    const defaults = await getTaskDefaults(ctxFor(db, id));
+    expect(defaults.ok && defaults.data.defaults.executorProfileId).toBe(second.executorProfileId);
+  });
+
+  it("keeps a local executor the Owner made, even with the image there", async () => {
+    const id = await bareWorkspace();
+    const [mine] = await db
+      .insert(executorProfile)
+      .values({
+        workspaceId: id,
+        name: "My laptop",
+        kind: "local",
+        config: { kind: "local", env: {} },
+      })
+      .returning();
+
+    const result = await connectWith(id, dockerWith(true));
+
+    expect(result.createdExecutor).toBe(false);
+    expect(result.executorProfileId).toBe(mine?.id ?? "");
+    expect((await rows(id)).executors).toHaveLength(1);
+    expect((await setupOf(id)).executorReplaceable).toBe(false);
+  });
+
+  it("keeps the local default when a container executor exists beside it — that was a choice", async () => {
+    const id = await bareWorkspace();
+    const local = await connectWith(id, dockerWith(false));
+    await db.insert(executorProfile).values({
+      workspaceId: id,
+      name: "Sandbox",
+      kind: "docker",
+      config: { kind: "docker", image: "my/claude:1", mounts: [], env: {} },
+    });
+
+    const again = await connectWith(id, dockerWith(true));
+
+    expect(again.executorProfileId).toBe(local.executorProfileId);
+    expect(again.createdExecutor).toBe(false);
+    expect((await rows(id)).executors).toHaveLength(2);
   });
 
   it("never counts another Workspace's executor as somewhere to run", async () => {

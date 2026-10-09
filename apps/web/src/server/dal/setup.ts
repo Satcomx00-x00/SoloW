@@ -6,6 +6,7 @@ import {
   type ConnectClaudeResultDto,
   createHarnessProfileInput,
   DEFAULT_EXECUTOR_CONFIG,
+  type DockerAvailabilityReport,
   type ExecutorKind,
   err,
   type HarnessConfigErrorCode,
@@ -21,7 +22,9 @@ import {
   type SetupTestProblem,
   type SetupTestResultDto,
   type SetupVerified,
+  setupExecutorPlan,
   setupVerifiedSchema,
+  usableExecutorImage,
   type WorkspaceSetupDto,
 } from "@solow/contracts";
 import {
@@ -80,8 +83,28 @@ const MADE_BY_SETUP: Record<
   },
 };
 
-/** The executor the setup creates when the Workspace has none, named for where it runs. */
-const SETUP_EXECUTOR_NAME = "This machine";
+/**
+ * The executors the setup creates, named for where they run. The local name is also how the setup
+ * recognises its own fallback later (`isSetupFallback`): an executor by that name, of that kind,
+ * is one nobody chose.
+ */
+const SETUP_EXECUTOR_NAME = { local: "This machine", docker: "Isolated container" } as const;
+
+/**
+ * Whether the executor a new Task gets is the local one the setup made for want of anything
+ * better — the only one connecting again may succeed (`setupExecutorPlan`). Not when the Workspace
+ * has a container executor: keeping the local one as the default beside it is a choice.
+ */
+function isSetupFallback(
+  current: { kind: ExecutorKind; name: string },
+  executors: ReadonlyArray<{ kind: ExecutorKind }>,
+): boolean {
+  return (
+    current.kind === "local" &&
+    current.name === SETUP_EXECUTOR_NAME.local &&
+    !executors.some((row) => row.kind === "docker")
+  );
+}
 
 type ConnectError =
   | typeof CommonErrorCode.ValidationFailed
@@ -95,18 +118,26 @@ type ConnectError =
  * Idempotent by construction. The credential is stored by name, so a second run replaces its
  * value rather than adding another Secret; the Profile is the one already bound to that Secret,
  * or made once; the executor is whatever a new Task already gets (`quickTaskProfiles`), and one
- * is created only when the Workspace has none. Nothing the Owner made is renamed, rewritten or
- * removed — the only rows this ever changes are the Secret it named and the defaults it set.
+ * is created only by `setupExecutorPlan`'s rule — when the Workspace has none, or when the one it
+ * has is the setup's own local fallback and the isolated image has since been built. Nothing the
+ * Owner made is renamed, rewritten or removed — the only rows this ever changes are the Secret it
+ * named and the defaults it set.
  *
- * Never a container on its own initiative. The Docker executor needs an image with Claude Code
- * inside it, SoloW ships no such image, and inventing one would make a setup whose test passes on
- * the host while every Task fails in a container that has no `claude`. So a Workspace with no
- * executor gets the local one — and the screen shows the host-run warning before the Owner
- * presses Connect, never after.
+ * Isolated when it can be (roadmap B4): a container on this machine, from the image
+ * `make executor-image` builds, once the orchestrator says Docker answers and already has that
+ * image. Not before: a container from an image without `claude` in it — or one that cannot be
+ * pulled, which a local tag cannot — is a Task that never starts. Otherwise the local executor,
+ * and the screen shows the host-run warning before the Owner presses Connect, never after.
+ *
+ * `availability` is a parameter so the choice can be tested without an orchestrator. Asked before
+ * the transaction, because it is a network round trip and a write lock must not wait on one.
  */
 export async function connectClaude(
   ctx: RequestContext,
   input: ConnectClaudeInput,
+  availability: (input: { workspaceId: string }) => Promise<DockerAvailabilityReport | null> = (
+    query,
+  ) => orchestrator.dockerAvailability(query),
 ): Promise<
   Result<
     { result: Omit<ConnectClaudeResultDto, "resumedTaskCount">; secretId: string },
@@ -117,6 +148,9 @@ export async function connectClaude(
   // have anyway — a rollback below has no reason to take it back.
   const catalogId = await ensureDefaultHarnessCatalog(ctx.db, ctx.workspaceId);
   const made = MADE_BY_SETUP[input.billing];
+  const isolatedImage = usableExecutorImage(
+    await availability({ workspaceId: ctx.workspaceId }).catch(() => null),
+  );
 
   const written = ctx.db.transaction(
     (
@@ -166,6 +200,7 @@ export async function connectClaude(
       const executors = tx
         .select({
           id: executorProfile.id,
+          name: executorProfile.name,
           kind: executorProfile.kind,
           createdAt: executorProfile.createdAt,
         })
@@ -177,15 +212,24 @@ export async function connectClaude(
         harnesses: [],
         executors,
       }).executorProfileId;
-      let executor = executors.find((row) => row.id === chosen);
-      const createdExecutor = !executor;
-      if (!executor) {
+      const current = executors.find((row) => row.id === chosen);
+      const plan = setupExecutorPlan({
+        current: current
+          ? { kind: current.kind, replaceable: isSetupFallback(current, executors) }
+          : null,
+        isolatedImage,
+      });
+      let executor: { id: string; kind: ExecutorKind } | undefined = current;
+      if (plan.action === "create") {
         executor = insertExecutorProfile(tx, ctx.workspaceId, {
-          name: SETUP_EXECUTOR_NAME,
-          config: DEFAULT_EXECUTOR_CONFIG,
+          name: SETUP_EXECUTOR_NAME[plan.kind],
+          config:
+            plan.kind === "docker"
+              ? { kind: "docker", image: plan.image, mounts: [], env: {} }
+              : DEFAULT_EXECUTOR_CONFIG,
         });
-        if (!executor) return err(CommonErrorCode.ValidationFailed);
       }
+      if (!executor) return err(CommonErrorCode.ValidationFailed);
 
       const defaults = writeTaskDefaults(tx, ctx, {
         harnessProfileId,
@@ -198,7 +242,7 @@ export async function connectClaude(
           harnessProfileId,
           executorProfileId: executor.id,
           executorKind: executor.kind,
-          createdExecutor,
+          createdExecutor: plan.action === "create",
         },
         secretId: stored.id,
       });
@@ -224,6 +268,8 @@ interface SetupSubject {
     secretUpdatedAt: string | null;
   } | null;
   executorKind: ExecutorKind | null;
+  /** See `isSetupFallback`. */
+  executorReplaceable: boolean;
 }
 
 /**
@@ -261,20 +307,17 @@ async function setupSubject(ctx: RequestContext): Promise<SetupSubject> {
         )
         .limit(1)
     : [];
-  const [executor] = pick.executorProfileId
-    ? await ctx.db
-        .select({ kind: executorProfile.kind })
-        .from(executorProfile)
-        .where(
-          and(
-            eq(executorProfile.workspaceId, ctx.workspaceId),
-            eq(executorProfile.id, pick.executorProfileId),
-          ),
-        )
-        .limit(1)
-    : [];
+  const executors = await ctx.db
+    .select({ id: executorProfile.id, name: executorProfile.name, kind: executorProfile.kind })
+    .from(executorProfile)
+    .where(eq(executorProfile.workspaceId, ctx.workspaceId));
+  const executor = executors.find((row) => row.id === pick.executorProfileId);
 
-  return { profile: profile ?? null, executorKind: executor?.kind ?? null };
+  return {
+    profile: profile ?? null,
+    executorKind: executor?.kind ?? null,
+    executorReplaceable: executor ? isSetupFallback(executor, executors) : false,
+  };
 }
 
 /**
@@ -391,6 +434,7 @@ export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<Wor
         }
       : null,
     executorKind: subject.executorKind,
+    executorReplaceable: subject.executorReplaceable,
     ready: coreLoop && steps.every((step) => step.done),
   });
 }

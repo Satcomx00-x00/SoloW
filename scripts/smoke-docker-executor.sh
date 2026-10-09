@@ -728,6 +728,20 @@ check_reason usable "exited immediately" no
 # makes the broken-image rung leak a container in state `Created`, which never appears in
 # `docker ps` and so passed this block while the leak it exists to catch was happening. A
 # `Created` container holds its CPU and memory reservation exactly as a running one does.
+#
+# Except the control's, when it passed: a ladder that passes keeps its container on purpose, since
+# that is the one the run goes on to adopt (`ensureContainer`). Only an image carrying `git` gets
+# that far — `alpine:3` stops at rung 8 — so this is what `SMOKE_DOCKER_IMAGE=solow-executor:local`
+# looks like. It has to be up, and is then removed, so the census asks about the failed rungs only.
+if [ "$(cat "$WORK/pf-usable.verdict")" = "ok" ]; then
+    KEPT="$(docker ps -q --filter "label=solow.workspace=$WORKSPACE" \
+        --filter "label=solow.task=preflight-usable")"
+    [ -n "$KEPT" ] || {
+        echo "smoke-docker-executor: the control's ladder passed but kept no running container." >&2
+        exit 1
+    }
+    echo "$KEPT" | xargs docker rm -f > /dev/null
+fi
 LEFTOVER="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE")"
 [ -z "$LEFTOVER" ] || {
     echo "smoke-docker-executor: a preflight that failed left a container behind:" >&2

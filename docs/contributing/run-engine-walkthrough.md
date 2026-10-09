@@ -379,6 +379,15 @@ the lifecycle calls `worktreeOps.commit(...)` and never calls git. `make audit-e
 tests the audit itself. Wrap new host access in the executor. Do not add an exemption to the
 audit.
 
+The web app never asks Docker anything itself, either. Whether the daemon answers, and whether it
+already has the executor image (`docker/executor/Dockerfile`, built by `make executor-image`), is
+the orchestrator's `POST /executor-availability` (`executor/availability.ts`), which the web app
+reads through `profile.executor.dockerAvailability`. The guided setup decides from that answer
+whether "Connect Claude" makes a Docker executor or a local one (`setupExecutorPlan`, and
+`connectClaude` in `apps/web/src/server/dal/setup.ts`). A Task that runs in a container needs that
+image or one like it, because the driver spawns the harness's bare command inside it. See
+[F07](../features/F07-execution-environments.md#the-executor-image).
+
 ### Secrets stay out of the agent's reach
 
 A harness gets the one credential its run needs, and nothing that would unlock the rest:
@@ -428,7 +437,10 @@ green, and a red main is fixed or reverted before anything else merges.
   development stack. CI runs it on every push to main, and a red result blocks the release. Run it
   before you merge a change that touches the loop. `CONTROL_SPEC=e2e/control/<name>.spec.ts` runs
   one spec.
-- **Before a commit.** The hooks in `.pre-commit-config.yaml` run biome, gitleaks and the
+- **A real container.** `make executor-image` builds the image the guided setup uses, then
+  `make smoke-docker SMOKE_DOCKER_IMAGE=solow-executor:local` (and `make test-docker-live` with
+  `SOLOW_TEST_DOCKER_IMAGE`) drive the Docker executor against it. Both skip without a daemon.
+- **Before a commit.** The hooks in `.pre-commit-config.yaml` run biome, gitleaks, hadolint and the
   commit-message check on commit, and the typecheck on push. Install them once per clone with
   `bun run hooks:install`.
 

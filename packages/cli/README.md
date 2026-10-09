@@ -42,7 +42,7 @@ The same two variables apply to `bun run dev` and `bun run start` in a source ch
 
 - **Node.js 20+** — to run `npx`.
 - To actually run harnesses you will want the [Claude Code](https://claude.com/claude-code) CLI on
-  your `PATH`; SoloW launches it per task.
+  your `PATH`; SoloW launches it per task. Or, with Docker, the isolated container below.
 
 ## Airgapped and npm-only installs
 
@@ -79,6 +79,7 @@ SOLOW_FETCH_BINARIES=1 npx @satcomx00-x00/solow
 npx @satcomx00-x00/solow [options]
 npx @satcomx00-x00/solow backup  [--out <dir>] [--no-engine] [--data-dir <path>]
 npx @satcomx00-x00/solow restore [<backup>] [--data-dir <path>]
+npx @satcomx00-x00/solow executor-image [--tag <name>]
 
   -p, --port <n>          Port for the web UI            (default 5000)
       --ws-port <n>       Port for the orchestrator      (default 5001)
@@ -126,6 +127,21 @@ Copying the folder while SoloW runs is not a reliable backup, because the databa
 `backup` takes a consistent copy of the database, the keys and the engine's state; worktrees and
 clones are not included. `restore` keeps what it replaces as a backup, so it can be undone.
 Details: [Backup and Restore](https://github.com/Satcomx00-x00/SoloW/blob/main/docs/operations/backup-and-restore.md).
+
+## Running agents in an isolated container
+
+Without it, an agent runs as you, on this machine, and can read, change or send anything you can.
+If Docker is installed, build the container image once:
+
+```
+npx @satcomx00-x00/solow executor-image
+```
+
+It builds `solow-executor:local` with Claude Code and opencode inside, then checks that both run
+as your user. From then on the guided setup's "Connect Claude" runs Claude in a container that
+sees only the repository it works on (connect again if you already had). The image holds no
+credentials; the one a task needs is handed in when it runs. Details:
+[Execution Environments](https://github.com/Satcomx00-x00/SoloW/blob/main/docs/features/F07-execution-environments.md#the-executor-image).
 
 ## Upgrading
 
