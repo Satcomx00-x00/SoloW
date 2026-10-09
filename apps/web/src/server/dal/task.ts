@@ -543,7 +543,7 @@ export async function updateTaskState(
   ctx: RequestContext,
   id: string,
   state: TaskState,
-  extra?: { failureReason?: string | null },
+  extra?: { failureReason?: string | null; completedAt?: string | null },
 ): Promise<Result<TaskDto, typeof CommonErrorCode.NotFound>> {
   const [row] = await ctx.db
     .update(task)
@@ -566,6 +566,8 @@ export async function updateTaskState(
       ...(state === "ready"
         ? { completedAt: null, completedOutcome: null, completedSummary: null }
         : {}),
+      // Putting back what a run claim cleared (`claimTaskRunSlot`), when the run never started.
+      ...(extra?.completedAt !== undefined ? { completedAt: extra.completedAt } : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))

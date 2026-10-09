@@ -1,4 +1,5 @@
 import type { SessionEventPayload, TaskState } from "@solow/contracts";
+import { PARK_WINDOW_MS } from "@solow/core";
 import { claimTaskRunSlot } from "@solow/db";
 import { captureException, logStateTransition } from "@solow/observability";
 import { appendSessionEvent, nextSessionEventSeq, setTaskState } from "../../../data.js";
@@ -14,15 +15,13 @@ import type { RunScope } from "./scope.js";
 /**
  * How long a run parked on an exhausted quota sleeps before it wakes itself up.
  *
- * Roughly one quota window; a real budget check would replace the guess rather than tune it.
- *
- * Exported for one reason, and it is not reuse: `reconcile.ts` keeps a second copy of this value
- * (`PARK_WINDOW_MS`) because a sweep that runs every sixty seconds must not import this module and
- * everything it drags in, and that copy decides when a parked run is called lost. The drift has a
- * direction — grow this without growing that, and the sweep starts condemning runs that are still
- * legitimately asleep — so `reconcile.test.ts` pins the two equal, and this export is what lets it.
+ * `PARK_WINDOW_MS` from `@solow/core`, not a value of its own: the reconcile sweep and the web
+ * app read that window to decide when a parked run is lost, and neither may import this module.
+ * A literal here would be a second copy with a direction to its drift — grow the sleep alone and
+ * the sweep condemns runs still legitimately asleep. `reconcile.test.ts` pins the two equal, and
+ * this export is what lets it.
  */
-export const PARK_SLEEP_MS = 5 * 60 * 60 * 1000;
+export const PARK_SLEEP_MS = PARK_WINDOW_MS;
 
 /**
  * Fail the run, say why, and stop — the shape `prepare-failed` and `executor-unavailable`

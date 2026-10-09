@@ -119,6 +119,7 @@ export const reviewRouter = router({
         await setSessionState(ctx.rctx, input.sessionId, session.state);
         await updateTaskState(ctx.rctx, session.taskId, "review", {
           failureReason: current.failureReason ?? null,
+          completedAt: current.completedAt,
         });
         throw cause;
       }

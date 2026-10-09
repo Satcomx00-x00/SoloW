@@ -1,10 +1,5 @@
 import { type AuthMode, BillingErrorCode, err, type Result } from "@solow/contracts";
-import {
-  classifyRunFailure,
-  type FailureSignal,
-  resolveHarnessRunEnv,
-  withinConcurrencyCap,
-} from "@solow/core";
+import { classifyRunFailure, type FailureSignal, resolveHarnessRunEnv } from "@solow/core";
 import { decryptForHarnessRun } from "@solow/db";
 
 /**
@@ -39,10 +34,6 @@ export function prepareHarnessEnv(params: {
     ...(params.profileEnv ? { profileEnv: params.profileEnv } : {}),
     ...(params.configEnv ? { configEnv: params.configEnv } : {}),
   });
-}
-
-export function canStart(cap: number, running: number): boolean {
-  return withinConcurrencyCap(cap, running);
 }
 
 export type { FailureSignal };

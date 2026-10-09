@@ -1094,14 +1094,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
   });
   /**
-   * Starting the harness, from the same arrow that would otherwise only have written the state.
+   * Starting the harness, from the forward arrow on a Ready Task.
    *
-   * `task.move` into `running` is accepted by the server — the transition is legal — and does
-   * nothing else: no Session is created and no launch is published. The Task page has no Launch
-   * button of its own, so the forward arrow on a Ready Task is the obvious way to begin a run
-   * here, and a bare move would leave a Task that reads as Running with no harness behind it,
-   * holding one of the Harness Profile's concurrency slots and with no way back — `running` has no
-   * legal retreat, and `task.launch` refuses a Task that is no longer Ready.
+   * The Task page has no Launch button of its own, so that arrow is the way to begin a run here.
+   * It calls `task.launch` rather than `task.move`, though a move into `running` now starts a run
+   * too (both reach `startTaskRun`): `task.launch` refuses anything but a Ready Task, which is
+   * the one case this arrow means, and it is the call the Workflow choice in `LaunchTaskDialog`
+   * ends in, so both ways of starting from this page take the same path.
    */
   const launch = trpc.task.launch.useMutation({
     onSuccess: () => {

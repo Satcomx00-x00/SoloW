@@ -193,7 +193,9 @@ one `diff` event per worktree. Then:
   exception is a harness that declared `blocked`: that run has nothing for a person to approve.
 - **On no Workflow**, the run does not move the Task. It stays `running` with its completion
   recorded, and the person opens the gate with the Task's "Open review" control
-  (`task.submitForReview`, gated by `canOpenReview` in `packages/core/src/task.ts`).
+  (`task.submitForReview`, gated by `canOpenReview` in `packages/core/src/task.ts`). Recording
+  the completion gives back its concurrency slot (see
+  [The concurrency cap](#the-concurrency-cap-is-one-rule-in-one-place)).
 
 Either way the run returns `awaiting_review` and **ends**. The `finally` in `runTaskLifecycle`
 disposes of the executor. That is a plain call, not a durable step, so a retry never replays a
@@ -345,10 +347,18 @@ out of `running` returns the slot by being that write. A parked Task holds no sl
 back on waking (`claimWokenSlot` in `terminal.ts`). If there is no room it stays parked and retries
 with a back-off (`slotRetryDelayMs`).
 
+One `running` row is not counted: a Task on no Workflow with `completed_at` set. Its run ended at
+`to-review` (step 6) and nothing runs until a person acts, so the write that records the
+completion is the release. Under a Workflow the same write comes before the Step's rule decides
+whether the run carries on into the next Step, so a Task on a Workflow keeps its slot until it
+leaves `running`. Every claim clears `completed_at` in the same write, so a start counts from
+the moment it takes the row, even when the Task kept an earlier run's declaration.
+
 Do not count running Tasks somewhere else and compare in JavaScript. That gap is how
 simultaneous starts all passed the cap before (FINDINGS F5). Tests:
 `apps/web/src/server/routers/task.concurrency.test.ts`, which fires N simultaneous starts at a real
-SQLite database, and the park-and-wake cases in `task-run.test.ts`.
+SQLite database and pins which finished Tasks hold a slot, and the park-and-wake cases in
+`task-run.test.ts`.
 
 ### Nothing integrates without a recorded human decision
 
@@ -446,13 +456,14 @@ no trace in the Session. Adding a notice there is a contained change to the run 
   then run that whole file. The change touches the run engine, so run `make control-check` before
   it merges.
 
-### 3. Pin down what a finished Task on no Workflow does to the cap
+### 3. Pin down that an approval under a Workflow takes a slot
 
-A Task on no Workflow whose harness has finished stays `running` until someone opens its review
-(step 6), and `claimTaskRunSlot` counts `running` rows. As written, then, that Task holds a slot
-while it waits for a person. Add a case to
-`apps/web/src/server/routers/task.concurrency.test.ts` that pins down today's behaviour, and name
-it for the rule it states. Do not commit a failing test to show that the rule is wrong: main stays
-green. If the rule looks wrong, raise it as a product question and change the behaviour in a
-separate change. Run the file on its own, then
+`review.decide` claims a cap slot for a decision that will run a harness: `request_changes`, and
+an `approve` on a Task with a Workflow (step 8). `task.concurrency.test.ts` covers the first, and
+covers a plain approval never waiting on the cap, but nothing pins the second. Add a case to
+`apps/web/src/server/routers/task.concurrency.test.ts` that gives a gated Task a `workflow_id`,
+fills its Profile's slots, and expects its approval to be refused with
+`ConcurrencyCapReached` and its gate left as it was. Name the case for the rule it states. It is
+a test of behaviour that already holds, so it should pass the first time it runs: if it does not,
+stop and raise it, because main stays green. Run the file on its own, then
 `bun run scripts/test-batches.ts apps/web --only src/server/routers`.

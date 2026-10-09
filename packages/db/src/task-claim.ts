@@ -1,5 +1,5 @@
 import type { TaskState } from "@solow/contracts";
-import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./index.js";
 import { harnessProfile, task } from "./schema.js";
 
@@ -17,6 +17,27 @@ import { harnessProfile, task } from "./schema.js";
  * forget to. The count and the cap are subqueries of the UPDATE that takes the row, so the write
  * that fills the last slot is the one every later write's count already includes; a count read
  * first and compared in JavaScript let N simultaneous starts all see room for one more.
+ *
+ * One `running` row holds no slot: a Task on no Workflow whose harness has finished. Its run
+ * ended at `to-review` and released its executor (ADR 0030), but the Task stays `running` until
+ * a person opens the review — that move is theirs, not the run's (`finishRound`). Counted, it
+ * held a slot for as long as nobody looked, and N finished Tasks refused every start on a cap of
+ * N, for a limit that is about harness spend. `completed_at` is what `to-review` writes, so that
+ * write is the release, the same way every other release is the write that ends the run.
+ *
+ * Only on no Workflow, because only there is `to-review` the run's last step. Under a Workflow
+ * it records the declaration before the Step's rule decides whether the cursor moves, and an
+ * advance runs the next Step's harness in the same run: releasing there would let another start
+ * take the slot in between. So a Task on a Workflow that ends `blocked` still counts until it
+ * leaves `running`, as does a Task with a Workflow attached in a Workspace with Workflows off.
+ * Both err towards the cap.
+ *
+ * The claim clears `completed_at` in the same write, so a start counts from the moment it takes
+ * the row: a Retry of a Task that kept an earlier run's declaration, or a decision sending one
+ * back to work, would otherwise run its harness uncounted until it declared again. Only the
+ * timestamp: the run a decision starts reads the declaration itself (`applyDecision`) and clears
+ * it once it has moved on. A caller that rolls a claim back restores the timestamp, because a
+ * gate put back without it would no longer show what the harness declared.
  *
  * `BEGIN IMMEDIATE` is for the read of the Task's Profile and the verdict on a loss: it takes
  * SQLite's write lock up front, so the other process sharing the file cannot move the row between
@@ -58,6 +79,8 @@ export function claimTaskRunSlot(
             eq(task.agentProfileId, current.agentProfileId),
             eq(task.state, "running"),
             isNull(task.deletedAt),
+            // Not a finished Task on no Workflow: see the comment at the top.
+            or(isNotNull(task.workflowId), isNull(task.completedAt)),
           ),
         );
       const cap = tx
@@ -71,7 +94,12 @@ export function claimTaskRunSlot(
         );
       const [row] = tx
         .update(task)
-        .set({ state: "running", failureReason: null, updatedAt: new Date().toISOString() })
+        .set({
+          state: "running",
+          failureReason: null,
+          completedAt: null,
+          updatedAt: new Date().toISOString(),
+        })
         .where(
           and(
             eq(task.workspaceId, workspaceId),

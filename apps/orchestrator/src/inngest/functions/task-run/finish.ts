@@ -74,6 +74,11 @@ export async function finishRound(
    * So the run records the declaration and the change, and stops. The Task stays where it is,
    * the board shows it as finished, and the transition into `review` is the operator's click —
    * one action, theirs (Principle I is a gate for a human to open, not a conveyor).
+   *
+   * On no Workflow, recording the declaration is also what gives back the Harness Profile's
+   * concurrency slot: the cap does not count a finished Task on no Workflow (`claimTaskRunSlot`),
+   * because nothing runs after this step there. Anything added after it on that path that
+   * starts a harness would run outside the cap.
    */
   const worktree = run.worktree;
   const gate = worktreeBindings(worktree);

@@ -111,7 +111,7 @@ secretscan: ## Scan the repository and its history for committed secrets
 verify: lint store-check typecheck test smoke smoke-docker test-docker-live openapi-check audit audit-executor-boundary audit-provider-branching secretscan e2e ## Every quality gate, in order
 	@echo "all quality gates passed"
 
-dev: ## Start ALL services (web :5000 + orchestrator :5001 + Inngest Dev Server :8288) with hot reload; auto-migrates+seeds
+dev: ## Start ALL services (web :5000 + orchestrator :5001 + Inngest server :8288) with hot reload; auto-migrates+seeds
 	bun run dev
 
 dev-web: ## Start only the web app (SPA + API) on :5000

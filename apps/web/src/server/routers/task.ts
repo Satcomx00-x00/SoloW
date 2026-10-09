@@ -151,6 +151,7 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
     // close the Session no run will ever write to.
     await updateTaskState(rctx, existing.id, existing.state, {
       failureReason: existing.failureReason ?? null,
+      completedAt: existing.completedAt,
     });
     if (sessionId) {
       await setSessionState(rctx, sessionId, "closed", { endedAt: new Date().toISOString() });

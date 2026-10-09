@@ -343,11 +343,11 @@ export const taskRun = inngest.createFunction(
      * Two runs on one Task share its worktree, its Session and its harness conversation, and
      * nothing in either can tell the other is there — it was seen as three harnesses running the
      * same Step side by side, each writing the cursor the others read. The start paths refuse a
-     * second start in the database (`claimTaskState`, `review.decide`), and a decision is taken up
-     * once (`decision-take-up`); this is the engine's half, for whatever reaches it anyway — a
-     * reconcile relaunch, a redelivered event. A limit rather than `singleton`: a second run waits
-     * its turn and then finds out from the database that it has nothing to do, where cancelling
-     * either one could stop a decision half-applied.
+     * second start in the database (`startTaskRun`'s `claimTaskRun`, and `review.decide`'s claim of
+     * the gate), and a decision is taken up once (`decision-take-up`); this is the engine's half,
+     * for whatever reaches it anyway — a reconcile relaunch, a redelivered event. A limit rather
+     * than `singleton`: a second run waits its turn and then finds out from the database that it
+     * has nothing to do, where cancelling either one could stop a decision half-applied.
      */
     concurrency: [{ key: "event.data.taskId", limit: 1 }],
     /**
