@@ -4,6 +4,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq } from "drizzle-orm";
 import { webEnv } from "../env.js";
+import { trustedOriginsFor } from "./trusted-origins.js";
 
 /**
  * BetterAuth instance (task TASK-011, plan §"Auth": local single-user Owner with Workspace
@@ -41,7 +42,8 @@ export function createAuth(db: Db = createDb()) {
     appName: "SoloW",
     secret: env.SOLOW_AUTH_SECRET,
     baseURL: env.SOLOW_WEB_URL,
-    trustedOrigins: [env.SOLOW_WEB_URL],
+    // Loopback spellings of the configured address too — see `trustedOriginsFor`.
+    trustedOrigins: trustedOriginsFor(env.SOLOW_WEB_URL),
     database: drizzleAdapter(db, { provider: "sqlite", schema: authSchema }),
     ...MODEL_NAMES,
     emailAndPassword: {
