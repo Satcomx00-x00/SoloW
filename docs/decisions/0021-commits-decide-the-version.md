@@ -139,3 +139,6 @@ at version 0.21.0.
   or `fix` merged to main is released the same day. The weekly cadence currently depends on
   merging to main weekly. Either the workflow gains a schedule, or the convention says plainly
   that main is merged to once a week.
+- Resolved the same day: `release.yml` now runs on a Monday schedule (and on dispatch) instead
+  of after every Verify run. It releases main's tip only when a push-to-main Verify run finished
+  green on that exact commit, and otherwise stands down until the next run.
