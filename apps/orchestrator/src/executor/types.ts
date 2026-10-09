@@ -106,10 +106,11 @@ export interface Executor {
   /** A long-lived harness process (e.g. the `claude` CLI in stream-JSON mode). */
   spawn(cmd: string[], opts: SpawnOpts): ProcessHandle;
   /**
-   * A program on a pseudo-terminal, for the Task page's terminal pane. Optional because only the
-   * local driver can hand a browser a terminal on its own host today; a container driver would
-   * need `docker exec -it`, and `spawn` deliberately never asks for a TTY (it merges stdout and
-   * stderr, which the harness runners depend on keeping apart).
+   * A program on a pseudo-terminal, for the Task page's terminal pane: on this host for the local
+   * driver, inside the container (`docker exec -it`) for the Docker one. Separate from `spawn`,
+   * which deliberately never asks for a TTY — a TTY merges stdout and stderr, which the harness
+   * runners depend on keeping apart. Optional because a driver that cannot relay one should say
+   * so rather than fake it; the pane then reports that this executor cannot open a terminal.
    */
   openTerminal?(cmd: string[], opts: TerminalOpts): TerminalHandle;
   /** A one-shot command: git, du, version probes. Never throws on a non-zero exit. */

@@ -4,7 +4,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { orchestratorEnv } from "../env.js";
 import type { HarnessRegistry } from "../harness/registry.js";
 import { RECLAIM_STALE_MS, STRANDED_PARK_REASON } from "../reconcile.js";
-import { CONTAINER_OWNER_PATH, deploymentId, ORCHESTRATOR_EPOCH } from "./docker.js";
+import {
+  CONTAINER_OWNER_PATH,
+  type ContainerRole,
+  deploymentId,
+  isOpenTerminal,
+  ORCHESTRATOR_EPOCH,
+} from "./docker.js";
 import type { Executor } from "./types.js";
 
 /**
@@ -144,7 +150,9 @@ export async function reapOrphanedContainers(
   if (listed.exitCode !== 0) return 0;
 
   const at = now().getTime();
-  let removed = await reapAbandonedOneShots(host, env.SOLOW_DOCKER_BIN, deployment, at);
+  let removed =
+    (await reapAbandonedOneShots(host, env.SOLOW_DOCKER_BIN, deployment, at)) +
+    (await reapAbandonedTerminals(host, env.SOLOW_DOCKER_BIN, deployment, at));
 
   for (const container of parseContainers(listed.stdout)) {
     // 1. Grace. A container younger than this may belong to a run that has not registered yet,
@@ -244,12 +252,56 @@ export async function reapOrphanedContainers(
  * Its own enumeration, and the session pass's is filtered to `solow.role=session`: the rules
  * there read the Task table, and a one-shot labelled with the Task it explains would otherwise be
  * judged as that Task's container — removed as "a previous run's" while the Explain was answering.
+ * A terminal carries its Task's label for the same reason and is kept out of that pass the same way.
  */
-async function reapAbandonedOneShots(
+function reapAbandonedOneShots(
   host: Executor,
   bin: string,
   deployment: string,
   at: number,
+): Promise<number> {
+  return reapByRole(
+    host,
+    bin,
+    deployment,
+    at,
+    "oneshot",
+    async (name, createdAt) =>
+      at - createdAt > ONE_SHOT_MAX_AGE_MS || !(await claimedByThisOrchestrator(host, bin, name)),
+  );
+}
+
+/**
+ * The terminal containers (`ContainerRole`) no open window holds.
+ *
+ * Judged by whether this process still holds a socket for it (`isOpenTerminal`), and by nothing
+ * else. Not by age, the one-shot's second rule: a terminal is legitimately open for a whole
+ * afternoon, and a ceiling short enough to catch a leak would close a window someone is typing
+ * in. Not by the claim either, which says this process *made* the container and cannot say it
+ * still wants it — a `dispose()` whose `docker rm` failed leaves a container claimed by a live
+ * process that has already let it go. A predecessor's terminals are in no live process's set,
+ * and go on the first sweep after the grace.
+ */
+function reapAbandonedTerminals(
+  host: Executor,
+  bin: string,
+  deployment: string,
+  at: number,
+): Promise<number> {
+  return reapByRole(host, bin, deployment, at, "terminal", async (name) => !isOpenTerminal(name));
+}
+
+/**
+ * Remove this deployment's containers of one request-scoped role that `abandoned` says nothing
+ * holds — one enumeration, the creation grace, and the rule that is the role's own.
+ */
+async function reapByRole(
+  host: Executor,
+  bin: string,
+  deployment: string,
+  at: number,
+  role: Exclude<ContainerRole, "session">,
+  abandoned: (name: string, createdAt: number) => Promise<boolean>,
 ): Promise<number> {
   const listed = await host.exec([
     bin,
@@ -258,7 +310,7 @@ async function reapAbandonedOneShots(
     "--filter",
     "label=solow.managed=true",
     "--filter",
-    "label=solow.role=oneshot",
+    `label=solow.role=${role}`,
     "--filter",
     `label=solow.deployment=${deployment}`,
     "--format",
@@ -267,15 +319,13 @@ async function reapAbandonedOneShots(
   if (listed.exitCode !== 0) return 0;
   let removed = 0;
   for (const line of listed.stdout.split("\n")) {
-    const [name, created] = line.split("\t");
-    if (!name?.trim()) continue;
+    const [rawName, created] = line.split("\t");
+    const name = rawName?.trim();
+    if (!name) continue;
     const createdAt = parseDockerTime(created ?? "");
     if (createdAt === null || at - createdAt < REAP_GRACE_MS) continue;
-    const abandoned =
-      at - createdAt > ONE_SHOT_MAX_AGE_MS ||
-      !(await claimedByThisOrchestrator(host, bin, name.trim()));
-    if (!abandoned) continue;
-    const result = await host.exec([bin, "rm", "-f", name.trim()]);
+    if (!(await abandoned(name, createdAt))) continue;
+    const result = await host.exec([bin, "rm", "-f", name]);
     if (result.exitCode === 0) removed += 1;
   }
   return removed;

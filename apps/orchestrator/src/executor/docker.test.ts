@@ -16,12 +16,16 @@ import {
   ensureContainer,
   failureText,
   guardMountSource,
+  isOpenTerminal,
   lastLine,
   type MountRoots,
   type ResolveLinks,
   runPrepareScript,
+  TERMINAL_DETACH_KEYS,
+  TERMINAL_ENV_PREFIX,
+  terminalShim,
 } from "./docker.js";
-import type { ExecResult, Executor, ProcessHandle } from "./types.js";
+import type { ExecResult, Executor, ProcessHandle, TerminalHandle, TerminalOpts } from "./types.js";
 
 /**
  * The Docker driver against a fake host `Executor` that only records argv (issue #96, F07).
@@ -103,11 +107,14 @@ interface FakeHost {
   calls: string[][];
   /** Everything written to a spawned process's stdin — where the environment travels. */
   stdin: string[];
+  /** Every pseudo-terminal the driver asked the host for, with the options it asked with. */
+  terminals: Array<{ cmd: string[]; opts: TerminalOpts }>;
 }
 
 function fakeHost(respond: Responder = daemon()): FakeHost {
   const calls: string[][] = [];
   const stdin: string[] = [];
+  const terminals: FakeHost["terminals"] = [];
   const settle = (cmd: string[]): ExecResult => ({
     stdout: "",
     stderr: "",
@@ -117,8 +124,9 @@ function fakeHost(respond: Responder = daemon()): FakeHost {
 
   const unused = () => {
     // Asserted by construction rather than by a test: the driver reaches the host only through
-    // `exec` and `spawn`. If it ever read the host's own `fs` or `metrics` it would be answering
-    // about the orchestrator's machine while claiming to describe the container.
+    // `exec`, `spawn` and `openTerminal`. If it ever read the host's own `fs` or `metrics` it
+    // would be answering about the orchestrator's machine while claiming to describe the
+    // container.
     throw new Error("the Docker driver must not use the host executor's fs, forward or metrics");
   };
 
@@ -145,6 +153,11 @@ function fakeHost(respond: Responder = daemon()): FakeHost {
         kill: () => {},
       };
     },
+    openTerminal(cmd, terminalOpts): TerminalHandle {
+      calls.push(cmd);
+      terminals.push({ cmd, opts: terminalOpts });
+      return { write: () => {}, resize: () => {}, kill: () => {}, exited: Promise.resolve(0) };
+    },
     async baseEnv() {
       return {};
     },
@@ -159,7 +172,7 @@ function fakeHost(respond: Responder = daemon()): FakeHost {
     metrics: unused,
     async dispose() {},
   };
-  return { executor, calls, stdin };
+  return { executor, calls, stdin, terminals };
 }
 
 async function* once(text: string): AsyncGenerator<Uint8Array> {
@@ -1213,5 +1226,140 @@ describe("one-shot containers", () => {
     expect(host.calls.filter((cmd) => cmd[1] === "rm")).toEqual([
       ["docker", "rm", "-f", containerNameFor(REQUEST, oneShot())],
     ]);
+  });
+});
+
+/**
+ * Terminal containers — the Task page's terminal, run where the Task runs (roadmap B4).
+ *
+ * A terminal shares the Task's image and mounts and nothing else that could tie it to the Task's
+ * run, and its environment reaches the program without ever being in the host's argv — the two
+ * things a fake host can read back. That the TTY, the detach keys and the resize behave is the
+ * live file's to prove.
+ */
+describe("terminal containers", () => {
+  const CONNECTION: DockerIds = { workspaceId: "ws-1", taskId: "task-1", sessionId: "conn-1" };
+  const terminal = (overrides: Partial<DockerExecutorOpts> = {}) =>
+    opts({ role: "terminal", ...overrides });
+  const TERM_OPTS = {
+    cwd: JAIL_ROOT,
+    env: { PATH: "/usr/bin:/bin", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-not-in-argv" },
+    cols: 100,
+    rows: 30,
+    onData: () => {},
+    onExit: () => {},
+  };
+
+  it("is named for its connection, never the Task's, and two windows never share one", () => {
+    const name = containerNameFor(CONNECTION, terminal());
+
+    expect(name).toMatch(/^solow-terminal-[0-9a-f]{12}$/);
+    expect(name).not.toBe(containerName(CONNECTION, DEPLOYMENT));
+    expect(containerNameFor({ ...CONNECTION, sessionId: "conn-2" }, terminal())).not.toBe(name);
+    // Not a one-shot's either, though both are named for an id rather than the Task.
+    expect(containerNameFor(CONNECTION, opts({ role: "oneshot" }))).not.toBe(name);
+  });
+
+  it("carries the Task's mounts under its own role, and looks only for its own connection's", async () => {
+    const host = fakeHost();
+    await ensureContainer(host.executor, CONFIG, CONNECTION, terminal());
+
+    const run = host.calls.find((cmd) => cmd[1] === "run") ?? [];
+    const labels = run.filter((_, i) => run[i - 1] === "--label");
+    expect(labels).toContain("solow.role=terminal");
+    expect(labels).toContain("solow.run=conn-1");
+    expect(labels).toContain("solow.task=task-1");
+    expect(run.filter((_, i) => run[i - 1] === "--mount")).toContain(
+      "type=bind,source=/srv/repos/app,target=/srv/repos/app",
+    );
+    const ps = host.calls.find((cmd) => cmd[1] === "ps") ?? [];
+    // Everything this lookup finds that is not adoptable is removed — so neither the Task's own
+    // container nor a second window's may ever be in it.
+    expect(ps.filter((_, i) => ps[i - 1] === "--filter")).toEqual([
+      "label=solow.managed=true",
+      `label=solow.deployment=${DEPLOYMENT}`,
+      "label=solow.role=terminal",
+      "label=solow.run=conn-1",
+    ]);
+  });
+
+  it("opens the program on a TTY inside the container, the environment by name only", () => {
+    const host = fakeHost();
+    const executor = createDockerExecutor(host.executor, CONFIG, CONNECTION, terminal());
+
+    executor.openTerminal?.(["bash", "-l"], TERM_OPTS);
+
+    const [opened] = host.terminals;
+    if (!opened) throw new Error("no terminal was opened on the host");
+    expect(opened.cmd).toEqual([
+      "docker",
+      "exec",
+      "-i",
+      "-t",
+      "--detach-keys",
+      TERMINAL_DETACH_KEYS,
+      "--user",
+      USER,
+      "-w",
+      JAIL_ROOT,
+      "-e",
+      `${TERMINAL_ENV_PREFIX}PATH`,
+      "-e",
+      `${TERMINAL_ENV_PREFIX}CLAUDE_CODE_OAUTH_TOKEN`,
+      containerNameFor(CONNECTION, terminal()),
+      "/bin/sh",
+      "-c",
+      terminalShim(["PATH", "CLAUDE_CODE_OAUTH_TOKEN"]),
+      "sh",
+      "bash",
+      "-l",
+    ]);
+    // The credential is in the CLI's own environment, under the prefix — never in argv, where
+    // `ps` shows it to every user on the host.
+    expect(opened.cmd.join(" ")).not.toContain("sk-ant-oat01-not-in-argv");
+    expect(opened.opts.env[`${TERMINAL_ENV_PREFIX}CLAUDE_CODE_OAUTH_TOKEN`]).toBe(
+      "sk-ant-oat01-not-in-argv",
+    );
+    expect(opened.opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    // Unprefixed, the Task's `PATH` would be the CLI's own and decide which `docker` runs.
+    expect(opened.opts.env[`${TERMINAL_ENV_PREFIX}PATH`]).toBe("/usr/bin:/bin");
+    expect(opened.opts.cols).toBe(100);
+  });
+
+  it("refuses a variable name the shim could not carry, rather than dropping it", () => {
+    const host = fakeHost();
+    const executor = createDockerExecutor(host.executor, CONFIG, CONNECTION, terminal());
+
+    expect(() =>
+      executor.openTerminal?.(["sh"], { ...TERM_OPTS, env: { "BAD'NAME": "x" } }),
+    ).toThrow("invalid environment variable name");
+    expect(host.terminals).toEqual([]);
+  });
+
+  it("replaces the environment: the shim names exactly what the caller set", () => {
+    expect(terminalShim(["HOME", "PATH"])).toBe(
+      `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+exec env -i 'HOME'="$${TERMINAL_ENV_PREFIX}HOME" 'PATH'="$${TERMINAL_ENV_PREFIX}PATH" "$@"`,
+    );
+  });
+
+  it("is held from construction until dispose, and lets go even when the removal fails", async () => {
+    const host = fakeHost(daemon([[/ rm -f /, { exitCode: 1, stderr: "daemon blip" }]]));
+    const ids = { ...CONNECTION, sessionId: "conn-held" };
+    const name = containerNameFor(ids, terminal());
+    expect(isOpenTerminal(name)).toBe(false);
+
+    const executor = createDockerExecutor(host.executor, CONFIG, ids, terminal());
+    expect(isOpenTerminal(name)).toBe(true);
+
+    await executor.dispose();
+    // The reaper takes what is no longer held, which is how a failed removal is finished.
+    expect(isOpenTerminal(name)).toBe(false);
+    expect(host.calls.filter((cmd) => cmd[1] === "rm")).toEqual([["docker", "rm", "-f", name]]);
+  });
+
+  it("never marks a Task's own container as a terminal", () => {
+    createDockerExecutor(fakeHost().executor, CONFIG, IDS, opts());
+    expect(isOpenTerminal(NAME)).toBe(false);
   });
 });
