@@ -29,6 +29,7 @@ import {
   surfaceLayoutSchema,
   TASK_DEFAULTS_PREFERENCE_KEY,
   TASK_PANE_PREFERENCE_KEY,
+  type TaskDefaults,
   type TaskDefaultsDto,
   type TaskPaneLayout,
   type TaskPaneLayoutDto,
@@ -346,42 +347,57 @@ export async function setAppearance(
  * on a preference nothing renders in a loop.
  */
 export async function getTaskDefaults(ctx: RequestContext): Promise<Result<TaskDefaultsDto>> {
-  const [row] = await ctx.db
+  const defaults = ctx.db.transaction((tx) => readTaskDefaults(tx, ctx));
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, defaults });
+}
+
+type Tx = Parameters<Parameters<RequestContext["db"]["transaction"]>[0]>[0];
+type Owner = Pick<RequestContext, "workspaceId" | "userId">;
+
+/** Whether this Workspace has a Profile with this id. A null id asks nothing and passes. */
+function profileExists(
+  tx: Tx,
+  workspaceId: string,
+  table: typeof harnessProfile | typeof executorProfile,
+  id: string | null,
+): boolean {
+  if (!id) return true;
+  const [found] = tx
+    .select({ id: table.id })
+    .from(table)
+    .where(and(eq(table.workspaceId, workspaceId), eq(table.id, id)))
+    .limit(1)
+    .all();
+  return Boolean(found);
+}
+
+/**
+ * The read behind `getTaskDefaults`, for a caller already inside a transaction — the guided setup
+ * reads the stored defaults in the same unit it rewrites them in.
+ */
+export function readTaskDefaults(tx: Tx, owner: Owner): TaskDefaults {
+  const [row] = tx
     .select({ value: uiPreference.value })
     .from(uiPreference)
     .where(
       and(
-        eq(uiPreference.workspaceId, ctx.workspaceId),
-        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.workspaceId, owner.workspaceId),
+        eq(uiPreference.userId, owner.userId),
         eq(uiPreference.key, TASK_DEFAULTS_PREFERENCE_KEY),
       ),
     )
-    .limit(1);
+    .limit(1)
+    .all();
 
   const parsed = taskDefaultsSchema.safeParse(row?.value);
   const stored = parsed.success ? parsed.data : DEFAULT_TASK_DEFAULTS;
+  const stillThere = (table: typeof harnessProfile | typeof executorProfile, id: string | null) =>
+    id && profileExists(tx, owner.workspaceId, table, id) ? id : null;
 
-  const stillThere = async (
-    table: typeof harnessProfile | typeof executorProfile,
-    id: string | null,
-  ): Promise<string | null> => {
-    if (!id) return null;
-    const [found] = await ctx.db
-      .select({ id: table.id })
-      .from(table)
-      .where(and(eq(table.workspaceId, ctx.workspaceId), eq(table.id, id)))
-      .limit(1);
-    return found ? id : null;
+  return {
+    harnessProfileId: stillThere(harnessProfile, stored.harnessProfileId),
+    executorProfileId: stillThere(executorProfile, stored.executorProfileId),
   };
-
-  return ok({
-    workspaceId: ctx.workspaceId,
-    userId: ctx.userId,
-    defaults: {
-      harnessProfileId: await stillThere(harnessProfile, stored.harnessProfileId),
-      executorProfileId: await stillThere(executorProfile, stored.executorProfileId),
-    },
-  });
 }
 
 /**
@@ -393,35 +409,38 @@ export async function setTaskDefaults(
   ctx: RequestContext,
   input: SetTaskDefaultsInput,
 ): Promise<Result<TaskDefaultsDto>> {
-  const owns = async (
-    table: typeof harnessProfile | typeof executorProfile,
-    id: string | null,
-  ): Promise<boolean> => {
-    if (!id) return true;
-    const [found] = await ctx.db
-      .select({ id: table.id })
-      .from(table)
-      .where(and(eq(table.workspaceId, ctx.workspaceId), eq(table.id, id)))
-      .limit(1);
-    return Boolean(found);
-  };
+  const written = ctx.db.transaction((tx) => writeTaskDefaults(tx, ctx, input), {
+    behavior: "immediate",
+  });
+  if (!written.ok) return written;
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, defaults: written.data });
+}
 
-  if (!(await owns(harnessProfile, input.harnessProfileId))) return err(CommonErrorCode.NotFound);
-  if (!(await owns(executorProfile, input.executorProfileId))) return err(CommonErrorCode.NotFound);
+/** The checked write behind `setTaskDefaults`, for a caller already inside a transaction. */
+export function writeTaskDefaults(
+  tx: Tx,
+  owner: Owner,
+  input: SetTaskDefaultsInput,
+): Result<TaskDefaults, typeof CommonErrorCode.NotFound> {
+  if (!profileExists(tx, owner.workspaceId, harnessProfile, input.harnessProfileId)) {
+    return err(CommonErrorCode.NotFound);
+  }
+  if (!profileExists(tx, owner.workspaceId, executorProfile, input.executorProfileId)) {
+    return err(CommonErrorCode.NotFound);
+  }
 
   const now = new Date().toISOString();
-  await ctx.db
-    .insert(uiPreference)
+  tx.insert(uiPreference)
     .values({
-      workspaceId: ctx.workspaceId,
-      userId: ctx.userId,
+      workspaceId: owner.workspaceId,
+      userId: owner.userId,
       key: TASK_DEFAULTS_PREFERENCE_KEY,
       value: input,
     })
     .onConflictDoUpdate({
       target: [uiPreference.workspaceId, uiPreference.userId, uiPreference.key],
       set: { value: input, updatedAt: now },
-    });
-
-  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, defaults: input });
+    })
+    .run();
+  return ok(input);
 }

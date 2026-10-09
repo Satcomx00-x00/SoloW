@@ -39,6 +39,8 @@ import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
 
+type Tx = Parameters<Parameters<RequestContext["db"]["transaction"]>[0]>[0];
+
 export async function listHarnessCatalog(
   ctx: RequestContext,
 ): Promise<Result<HarnessCatalogEntryDto[]>> {
@@ -103,41 +105,85 @@ export async function createHarnessCatalogEntry(
  * for the harness the Profile runs (Decision 0028) — an opencode config handed to Claude Code
  * would be refused at launch, after a Task was already queued behind it.
  */
-async function checkHarnessConfig(
-  ctx: RequestContext,
+function checkHarnessConfig(
+  tx: Tx,
+  workspaceId: string,
   harnessConfigId: string | null | undefined,
   agentCatalogId: string,
-): Promise<
-  Result<
-    void,
-    typeof CommonErrorCode.ValidationFailed | typeof HarnessConfigErrorCode.HarnessMismatch
-  >
+): Result<
+  void,
+  typeof CommonErrorCode.ValidationFailed | typeof HarnessConfigErrorCode.HarnessMismatch
 > {
   if (!harnessConfigId) return ok(undefined);
-  const [[config], [entry]] = await Promise.all([
-    ctx.db
-      .select({ harness: harnessConfig.harness })
-      .from(harnessConfig)
-      .where(
-        and(eq(harnessConfig.workspaceId, ctx.workspaceId), eq(harnessConfig.id, harnessConfigId)),
-      )
-      .limit(1),
-    ctx.db
-      .select({
-        protocol: harnessCatalog.protocol,
-        key: harnessCatalog.key,
-        command: harnessCatalog.command,
-      })
-      .from(harnessCatalog)
-      .where(
-        and(eq(harnessCatalog.workspaceId, ctx.workspaceId), eq(harnessCatalog.id, agentCatalogId)),
-      )
-      .limit(1),
-  ]);
+  const [config] = tx
+    .select({ harness: harnessConfig.harness })
+    .from(harnessConfig)
+    .where(and(eq(harnessConfig.workspaceId, workspaceId), eq(harnessConfig.id, harnessConfigId)))
+    .limit(1)
+    .all();
+  const [entry] = tx
+    .select({
+      protocol: harnessCatalog.protocol,
+      key: harnessCatalog.key,
+      command: harnessCatalog.command,
+    })
+    .from(harnessCatalog)
+    .where(and(eq(harnessCatalog.workspaceId, workspaceId), eq(harnessCatalog.id, agentCatalogId)))
+    .limit(1)
+    .all();
   if (!config || !entry) return err(CommonErrorCode.ValidationFailed);
   return config.harness === configHarnessFor(entry)
     ? ok(undefined)
     : err(HarnessConfigErrorCode.HarnessMismatch);
+}
+
+type HarnessProfileRow = typeof harnessProfile.$inferSelect;
+
+/**
+ * The checks and the insert behind `createHarnessProfile`, synchronous so the guided setup can
+ * create a Profile in the same transaction as the Secret it points at (`connectClaude`). The
+ * default Workflows are not seeded here: that is async, and it belongs after the commit.
+ */
+export function insertHarnessProfile(
+  tx: Tx,
+  workspaceId: string,
+  input: CreateHarnessProfileInput,
+): Result<
+  HarnessProfileRow,
+  typeof CommonErrorCode.ValidationFailed | typeof HarnessConfigErrorCode.HarnessMismatch
+> {
+  // The FK alone only proves the catalog row exists *somewhere* — without this check, an
+  // Harness Profile could point at another Workspace's catalog entry and inherit its launch
+  // command and billing variable names (Principle V).
+  const [entry] = tx
+    .select({ id: harnessCatalog.id })
+    .from(harnessCatalog)
+    .where(
+      and(eq(harnessCatalog.workspaceId, workspaceId), eq(harnessCatalog.id, input.agentCatalogId)),
+    )
+    .limit(1)
+    .all();
+  if (!entry) return err(CommonErrorCode.ValidationFailed);
+  const config = checkHarnessConfig(tx, workspaceId, input.harnessConfigId, input.agentCatalogId);
+  if (!config.ok) return config;
+
+  const [row] = tx
+    .insert(harnessProfile)
+    .values({
+      workspaceId,
+      name: input.name,
+      agentCatalogId: input.agentCatalogId,
+      authMode: input.authMode,
+      secretId: input.secretId,
+      concurrencyCap: input.concurrencyCap,
+      permissionMode: input.permissionMode,
+      model: input.model,
+      modeId: input.modeId,
+      harnessConfigId: input.harnessConfigId,
+    })
+    .returning()
+    .all();
+  return row ? ok(row) : err(CommonErrorCode.ValidationFailed);
 }
 
 export async function createHarnessProfile(
@@ -149,44 +195,16 @@ export async function createHarnessProfile(
     typeof CommonErrorCode.ValidationFailed | typeof HarnessConfigErrorCode.HarnessMismatch
   >
 > {
-  // The FK alone only proves the catalog row exists *somewhere* — without this check, an
-  // Harness Profile could point at another Workspace's catalog entry and inherit its launch
-  // command and billing variable names (Principle V).
-  const [entry] = await ctx.db
-    .select({ id: harnessCatalog.id })
-    .from(harnessCatalog)
-    .where(
-      and(
-        eq(harnessCatalog.workspaceId, ctx.workspaceId),
-        eq(harnessCatalog.id, input.agentCatalogId),
-      ),
-    )
-    .limit(1);
-  if (!entry) return err(CommonErrorCode.ValidationFailed);
-  const config = await checkHarnessConfig(ctx, input.harnessConfigId, input.agentCatalogId);
-  if (!config.ok) return config;
-
-  const [row] = await ctx.db
-    .insert(harnessProfile)
-    .values({
-      workspaceId: ctx.workspaceId,
-      name: input.name,
-      agentCatalogId: input.agentCatalogId,
-      authMode: input.authMode,
-      secretId: input.secretId,
-      concurrencyCap: input.concurrencyCap,
-      permissionMode: input.permissionMode,
-      model: input.model,
-      modeId: input.modeId,
-      harnessConfigId: input.harnessConfigId,
-    })
-    .returning();
+  const written = ctx.db.transaction((tx) => insertHarnessProfile(tx, ctx.workspaceId, input), {
+    behavior: "immediate",
+  });
+  if (!written.ok) return written;
   // The Workspace's first Profile is what the default Workflows were waiting for: a Step has to
   // name the harness that runs it, so they could not be seeded before one existed (spec F03).
-  if (row) await ensureDefaultWorkflows(ctx.db, ctx.workspaceId);
+  await ensureDefaultWorkflows(ctx.db, ctx.workspaceId);
   // A Profile just created cannot be referenced by anything yet — nothing existed a statement
   // ago that could point at this id.
-  return row ? ok({ ...row, usage: EMPTY_USAGE }) : err(CommonErrorCode.ValidationFailed);
+  return ok({ ...written.data, usage: EMPTY_USAGE });
 }
 
 /** A Harness Profile referenced by nothing yet — every count zero, computed rather than guessed. */
@@ -313,15 +331,30 @@ export async function updateHarnessProfile(
     | typeof HarnessConfigErrorCode.HarnessMismatch
   >
 > {
-  if (input.harnessConfigId) {
-    const [current] = await ctx.db
-      .select({ agentCatalogId: harnessProfile.agentCatalogId })
-      .from(harnessProfile)
-      .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, input.id)))
-      .limit(1);
-    if (!current) return err(CommonErrorCode.NotFound);
-    const config = await checkHarnessConfig(ctx, input.harnessConfigId, current.agentCatalogId);
-    if (!config.ok) return config;
+  const harnessConfigId = input.harnessConfigId;
+  if (harnessConfigId) {
+    const checked = ctx.db.transaction(
+      (
+        tx,
+      ): Result<
+        void,
+        | typeof CommonErrorCode.NotFound
+        | typeof CommonErrorCode.ValidationFailed
+        | typeof HarnessConfigErrorCode.HarnessMismatch
+      > => {
+        const [current] = tx
+          .select({ agentCatalogId: harnessProfile.agentCatalogId })
+          .from(harnessProfile)
+          .where(
+            and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, input.id)),
+          )
+          .limit(1)
+          .all();
+        if (!current) return err(CommonErrorCode.NotFound);
+        return checkHarnessConfig(tx, ctx.workspaceId, harnessConfigId, current.agentCatalogId);
+      },
+    );
+    if (!checked.ok) return checked;
   }
   const [row] = await ctx.db
     .update(harnessProfile)
@@ -374,16 +407,22 @@ export async function createExecutorProfile(
   ctx: RequestContext,
   input: CreateExecutorProfileInput,
 ): Promise<Result<ExecutorProfileDto>> {
-  const [row] = await ctx.db
-    .insert(executorProfile)
-    .values({
-      workspaceId: ctx.workspaceId,
-      name: input.name,
-      kind: input.config.kind,
-      config: input.config,
-    })
-    .returning();
+  const row = ctx.db.transaction((tx) => insertExecutorProfile(tx, ctx.workspaceId, input));
   return row ? ok(row) : err(CommonErrorCode.ValidationFailed);
+}
+
+/** The insert behind `createExecutorProfile`, for a caller already inside a transaction. */
+export function insertExecutorProfile(
+  tx: Tx,
+  workspaceId: string,
+  input: CreateExecutorProfileInput,
+): ExecutorProfileDto | undefined {
+  const [row] = tx
+    .insert(executorProfile)
+    .values({ workspaceId, name: input.name, kind: input.config.kind, config: input.config })
+    .returning()
+    .all();
+  return row;
 }
 
 export async function updateExecutorProfile(

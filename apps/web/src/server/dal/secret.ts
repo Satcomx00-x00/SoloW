@@ -59,6 +59,46 @@ export async function listSecretRefs(ctx: RequestContext): Promise<Result<Secret
   return ok(rows.map((row) => secretToRef(row, usage.get(row.id) ?? [])));
 }
 
+type Tx = Parameters<Parameters<RequestContext["db"]["transaction"]>[0]>[0];
+
+/**
+ * The write behind `setSecret`: encrypt, then replace the value of the Secret with this name or
+ * create one. Synchronous and handed a transaction so the guided setup can store a credential
+ * in the same unit as the Profile that points at it (`connectClaude`) — one rule for storing a
+ * Secret, whichever caller asked. Answers with the row's metadata, never the value.
+ */
+export function writeSecret(
+  tx: Tx,
+  workspaceId: string,
+  input: SetSecretInput,
+): Pick<SecretRefDto, "id" | "name" | "kind"> | undefined {
+  const ciphertext = encryptSecret(input.value);
+  const [existing] = tx
+    .select({ id: secret.id })
+    .from(secret)
+    .where(and(eq(secret.workspaceId, workspaceId), eq(secret.name, input.name)))
+    .limit(1)
+    .all();
+
+  if (existing) {
+    // Replacing the value does not change who holds the Secret — the id is the same row.
+    const [row] = tx
+      .update(secret)
+      .set({ ciphertext, kind: input.kind, updatedAt: new Date().toISOString() })
+      .where(and(eq(secret.workspaceId, workspaceId), eq(secret.id, existing.id)))
+      .returning({ id: secret.id, name: secret.name, kind: secret.kind })
+      .all();
+    return row;
+  }
+
+  const [row] = tx
+    .insert(secret)
+    .values({ workspaceId, name: input.name, kind: input.kind, ciphertext })
+    .returning({ id: secret.id, name: secret.name, kind: secret.kind })
+    .all();
+  return row;
+}
+
 /**
  * Set (create or replace) a Secret. The value is encrypted before storage and the
  * response is metadata only — the plaintext is never returned (Principle IV / spec F17).
@@ -67,31 +107,14 @@ export async function setSecret(
   ctx: RequestContext,
   input: SetSecretInput,
 ): Promise<Result<SecretRefDto>> {
-  const ciphertext = encryptSecret(input.value);
-  const [existing] = await ctx.db
-    .select({ id: secret.id })
-    .from(secret)
-    .where(and(eq(secret.workspaceId, ctx.workspaceId), eq(secret.name, input.name)))
-    .limit(1);
-
-  if (existing) {
-    const [row] = await ctx.db
-      .update(secret)
-      .set({ ciphertext, kind: input.kind, updatedAt: new Date().toISOString() })
-      .where(and(eq(secret.workspaceId, ctx.workspaceId), eq(secret.id, existing.id)))
-      .returning({ id: secret.id, name: secret.name, kind: secret.kind });
-    if (!row) return err(CommonErrorCode.ValidationFailed);
-    // Replacing the value does not change who holds the Secret — the id is the same row.
-    const usage = await loadSecretUsage(ctx);
-    return ok(secretToRef(row, usage.get(row.id) ?? []));
-  }
-
-  const [row] = await ctx.db
-    .insert(secret)
-    .values({ workspaceId: ctx.workspaceId, name: input.name, kind: input.kind, ciphertext })
-    .returning({ id: secret.id, name: secret.name, kind: secret.kind });
-  // Nothing can reference a Secret that did not exist a statement ago.
-  return row ? ok(secretToRef(row)) : err(CommonErrorCode.ValidationFailed);
+  // `BEGIN IMMEDIATE`, so the name lookup and the write it decides cannot be split by a second
+  // writer creating the same name in between.
+  const row = ctx.db.transaction((tx) => writeSecret(tx, ctx.workspaceId, input), {
+    behavior: "immediate",
+  });
+  if (!row) return err(CommonErrorCode.ValidationFailed);
+  const usage = await loadSecretUsage(ctx);
+  return ok(secretToRef(row, usage.get(row.id) ?? []));
 }
 
 /**
