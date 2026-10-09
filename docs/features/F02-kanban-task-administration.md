@@ -16,7 +16,7 @@ harness work.
 
 ## User stories
 
-- As a Team Lead, I want to see all harness Tasks for an Issue on one board, so I understand
+- *(Later — team use.)* As a Team Lead, I want to see all harness Tasks for an Issue on one board, so I understand
   the state of that work.
 - As a Solo Power User, I want to drag a Task between columns to change its state, so I can
   manage work directly.

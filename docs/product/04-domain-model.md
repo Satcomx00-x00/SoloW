@@ -16,7 +16,7 @@ resulting **Diff** and decides what ships.
 ## Concepts and relationships
 
 - A **Workspace** contains everything else and is the boundary of ownership and (when
-  hosted) access.
+  hosted, which is Later) access. Today an installation has one Owner and one Workspace.
 - A **Workspace** connects many **Repositories**.
 - A **Workspace** holds many **Issues**.
 - An **Issue** contains many **Tasks**. A Task always belongs to exactly one Issue.
@@ -69,7 +69,7 @@ Harness's work with its prior context.
 - Everything is scoped to a **Workspace**.
 - **Profiles**, **Workflows**, **Repositories**, **Integrations**, and secrets are defined
   at the Workspace level and reused across Issues and Tasks.
-- In hosted deployments, access is granted per Workspace.
+- In hosted deployments (Later), access is granted per Workspace.
 
 ## Relationship summary
 

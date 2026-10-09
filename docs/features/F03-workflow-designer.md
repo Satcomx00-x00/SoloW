@@ -18,7 +18,7 @@ steerable without reading logs.
 
 ## User stories
 
-- As a Team Lead, I want to design a process where one harness plans, another implements, and
+- *(Later — team use.)* As a Team Lead, I want to design a process where one harness plans, another implements, and
   a third reviews, so my team runs it the same way every time.
 - As a user, I want to see, as a graph, where a running Workflow currently is, so I
   understand its state instantly.

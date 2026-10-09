@@ -23,7 +23,7 @@ each harness runtime is handed it, because Claude Code and an ACP agent take it 
 
 - As an Operator, I want to register an MCP server once — with its token kept in the vault — and
   have every harness able to call it, so I stop pasting configs into harnesses.
-- As a Team Lead, I want to write a Skill in SoloW, or point at the checkout where our team keeps
+- *(Later — team use.)* As a Team Lead, I want to write a Skill in SoloW, or point at the checkout where our team keeps
   them, and have harnesses read it, so our conventions travel with the work.
 - As a Workflow author, I want a Step to load a Skill or a server the rest of the pipeline does
   not, so a Step is equipped for its job and nothing else.

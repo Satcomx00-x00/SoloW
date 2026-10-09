@@ -101,5 +101,6 @@ migration.
 
 - A backup made by the checkout names its key `dev-secret.key`. The npm package reads
   `secret.key`. To move data between the two, rename the file after restoring.
-- Hosted deployments on Postgres are not covered. This is the local, SQLite deployment
+- Hosted deployments on Postgres are Later and not built; this covers the local, SQLite
+  deployment, the only one there is
   ([Decision 0008](../decisions/0008-data-store-strategy.md)).

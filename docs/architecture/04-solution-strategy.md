@@ -43,7 +43,8 @@ harness-run code. → [Decision 0005](../decisions/0005-subscription-authenticat
 ## Strategy 6 — One data model, two stores
 
 The same conceptual data model backs both deployments: a lightweight embedded store for
-local use and a shared database for hosted use, chosen by configuration.
+local use and a shared database for hosted use, chosen by configuration. *Only the embedded
+store is wired; the shared database is Later with hosting ([0031](../decisions/0031-focus-on-the-solo-power-user.md)).*
 → [Decision 0008](../decisions/0008-data-store-strategy.md)
 
 ## Strategy 7 — Visual, node-graph Workflows

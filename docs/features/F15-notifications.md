@@ -8,6 +8,11 @@ Notifications tell users when something needs their attention — most important
 or Workflow Run is waiting on a human decision. They keep the review-first model working
 without users having to watch the board constantly.
 
+> **Later, except one in-app notice.** Notifications are moved after 1.0 by [0031](../decisions/0031-focus-on-the-solo-power-user.md). What is
+> built: an in-app notice when a run fails or gets stuck, linking to its Task (several at once
+> collapse into one count). Not built: notices for Review, Gates, completion or Parked; a
+> notification list; preferences (FR-4); and any channel other than in-app.
+
 ## Jobs served
 
 - **J4 — Watch a process unfold.**
@@ -18,7 +23,7 @@ without users having to watch the board constantly.
 - As a Reviewer, I want to be notified when a Task needs my review, so I respond promptly.
 - As a user, I want to know when a long-running Task finishes, fails, or is Parked, so I can
   act.
-- As a Team Lead, I want notifications delivered to our chat, so the team sees them where
+- *(Later — team use.)* As a Team Lead, I want notifications delivered to our chat, so the team sees them where
   they already work.
 
 ## Functional requirements

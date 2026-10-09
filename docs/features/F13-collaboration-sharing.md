@@ -8,6 +8,10 @@ SoloW lets users share what harnesses did so teammates can learn from, review, o
 on it. The primary mechanism is a redacted, shareable Snapshot of a Task's Conversation and
 outcome.
 
+> **Later.** Sharing is moved after 1.0 by [0031](../decisions/0031-focus-on-the-solo-power-user.md). Nothing in this specification is built
+> except FR-4: a Workflow can be exported and imported as a versioned JSON document
+> ([F03](./F03-workflow-designer.md)). There are no Snapshots, share links or redaction.
+
 ## Jobs served
 
 - **J9 — Collaborate and share.**
@@ -17,7 +21,7 @@ outcome.
 - As a user, I want to share a clean record of how a harness solved a Task, so a teammate can
   learn from it.
 - As a user, I want sensitive details removed from a shared record, so I do not leak secrets.
-- As a Team Lead, I want a reusable Workflow to be shareable, so my team adopts it.
+- *(Later — team use.)* As a Team Lead, I want a reusable Workflow to be shareable, so my team adopts it.
 
 ## Functional requirements
 
@@ -29,7 +33,7 @@ outcome.
   (see [F12](./F12-integrations.md)).
 - **FR-4** A user can export and import a Workflow definition so processes can be shared
   (see [F03](./F03-workflow-designer.md)).
-- **FR-5** In hosted deployments, sharing respects Workspace access boundaries
+- **FR-5** In hosted deployments (Later), sharing respects Workspace access boundaries
   (see [F16](./F16-platform-deployment.md)).
 
 ## Non-functional requirements

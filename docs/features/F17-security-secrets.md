@@ -18,7 +18,7 @@ protected and how the boundary between harnesses and credentials is kept safe.
 - As a user, I want my credentials stored safely and never shown again, so they cannot leak.
 - As an Operator, I want to be sure harness-run code cannot read the credentials it uses, so a
   misbehaving harness cannot exfiltrate them.
-- As a Team Lead, I want secrets scoped to a Workspace, so they are not shared beyond their
+- *(Later — team use.)* As a Team Lead, I want secrets scoped to a Workspace, so they are not shared beyond their
   intended reach.
 
 ## Functional requirements
@@ -41,7 +41,7 @@ protected and how the boundary between harnesses and credentials is kept safe.
   recorded.
 - **FR-7** Shared exports are redacted so secrets never appear in them (see [F13](./F13-collaboration-sharing.md)).
 - **FR-8** In hosted deployment, access to a Workspace's secrets follows its access control
-  (see [F16](./F16-platform-deployment.md)).
+  (see [F16](./F16-platform-deployment.md)). *(Later: hosted deployment is not built.)*
 - **FR-9** Sign-in is on by default in every launcher: a fresh install asks for the Owner
   account. The "every visitor is the Owner" mode (`SOLOW_DEV_OWNER=on`) is development-only,
   never a launcher default, and is refused when the services are exposed to the network.

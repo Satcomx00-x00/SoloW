@@ -15,10 +15,12 @@ quality-driven goals the architecture must satisfy.
    or work. Isolation is a structural property, not a convention.
 2. **Durable, resumable orchestration.** Long, multi-step processes survive interruptions and
    pause cleanly for human decisions, then resume rather than restart.
-3. **Uniform harness integration.** Many different harness tools are driven through one standard
-   protocol, so adding a harness does not change the rest of the system.
+3. **Uniform harness integration.** Different harness tools are driven through a small set of
+   protocols (the open Agent Client Protocol for most), so adding a harness does not change the
+   rest of the system.
 4. **One product, two deployment modes.** The same system runs locally for one user and
-   hosted for a team, differing only in configuration.
+   hosted for a team, differing only in configuration. *Only the local mode exists; hosted
+   team use is Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)).*
 5. **Trustworthy handling of money and secrets.** Billing mode is honoured exactly; secrets
    never reach harness-run code; nothing leaves the user's control without an explicit action.
 
@@ -27,9 +29,9 @@ quality-driven goals the architecture must satisfy.
 | Stakeholder | Primary concern |
 |-------------|-----------------|
 | Solo Power User | Fast, cheap, local, in-control parallel harness work |
-| Team Lead | Standardised, review-gated, shared team use |
-| Reviewer | Clear, trustworthy review of harness changes |
-| Operator | Safe, reliable, access-controlled hosted operation |
+| Team Lead *(Later)* | Standardised, review-gated, shared team use |
+| Reviewer | Clear, trustworthy review of harness changes (in 1.0, the solo user) |
+| Operator | Safe, reliable operation (in 1.0, the solo user on their own machine; access-controlled hosted operation is Later) |
 
 ## Relationship to the rest of the documentation
 
