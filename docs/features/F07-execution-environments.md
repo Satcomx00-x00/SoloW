@@ -74,10 +74,50 @@ executor is documented, and presented, as **for trusted agents only**.
 
 - **A new Executor starts as Docker whenever Docker is reachable.** The orchestrator answers
   `POST /executor-availability` (a signed ticket, like the harness probe) by asking the daemon for
-  its version; the Executors page reads it through `profile.executor.dockerAvailability`. When the
-  orchestrator cannot be asked, the page does not read that as "no Docker" and says so.
+  its version, and whether it already has the executor image (below); the Executors page reads it
+  through `profile.executor.dockerAvailability`, and a new Docker executor's image field starts
+  filled in with that image when it is there. When the orchestrator cannot be asked, the page does
+  not read that as "no Docker" and says so.
 - **A new Task starts on the Docker executor** when the Owner has not saved a default and the
   Workspace has one.
+- **The guided setup puts Claude in a container when it can.** "Connect Claude" creates an
+  executor named "Isolated container" from the executor image when Docker answers and already has
+  that image, and "This machine" (local) otherwise. Re-running it after the image is built moves a
+  Workspace still on the setup's own "This machine" — with no Docker executor of any kind — onto a
+  new isolated one and makes that the default; the local one stays in Settings, unchanged. An
+  executor the Owner made, or a local default kept beside an existing Docker executor, is never
+  overruled. Server and screen apply one rule, `setupExecutorPlan` in `@solow/contracts`, so the
+  screen says where Claude will work before Connect is pressed: in the container, or on this
+  machine under the host-run warning, with the command that builds the image when that is all
+  that is missing.
+
+### The executor image
+
+The Docker driver spawns the harness's bare command inside `config.image`, so a container is only
+as useful as an image with a harness in it. SoloW's is `docker/executor/Dockerfile`:
+
+- **Contents.** Debian 13 slim, `git` and `ca-certificates`, Claude Code and opencode as their
+  native executables in `/usr/local/bin`, and nothing else — no Node, no npm, no credentials. The
+  versions are pinned in the file (`ARG CLAUDE_CODE_VERSION`, `ARG OPENCODE_VERSION`); opencode's
+  must equal the orchestrator's `@opencode/cli` dependency and the catalog's `minVersion`, which
+  `executor-image.test.ts` checks. The harnesses' self-updaters are switched off, since the
+  install directory is root's and a run is not.
+- **The user.** `USER 1000:1000`, named `solow`. The driver always passes `--user` with the
+  orchestrator's own uid:gid anyway, so the harnesses are world-executable, and `HOME` is left to
+  the driver's tmpfs: the image declares none, because a declared one would win over it.
+- **Building it.** `make executor-image` in a checkout, or `npx @satcomx00-x00/solow
+  executor-image` for an npm install — the same code (`packages/cli/bin/solow.mjs`), reading the
+  same Dockerfile (shipped in the package as `dist/executor/Dockerfile`). It pipes the file to
+  `docker build -`, so there is no build context to leak from, tags `solow-executor:local`, then
+  runs `claude --version` and `opencode --version` in it as the invoking uid with a tmpfs `HOME`,
+  and only then calls it ready. `make smoke-docker SMOKE_DOCKER_IMAGE=solow-executor:local` puts it
+  through the driver's own preflight and acceptance checks.
+- **Naming another image.** `SOLOW_EXECUTOR_IMAGE` on the orchestrator names the image the setup
+  looks for (and the build tags, when set for it too). It is looked up, never pulled: a local tag
+  has no registry, and the setup chooses a container only when the daemon already has the image.
+- **Not yet.** No registry publishes it; every machine builds its own. And the setup's test run
+  still probes the harness on the host, not in the container, so it can report Claude Code
+  missing on a host that does not have it even though the container does.
 - **Never-ask on the local executor is a deliberate choice.** Wherever a Task is created or a batch
   launched, the pairing of a `bypassPermissions` Harness Profile with a `local` Executor shows an
   alert ("This run is not isolated") before the Owner confirms. There is no server-side refusal:
