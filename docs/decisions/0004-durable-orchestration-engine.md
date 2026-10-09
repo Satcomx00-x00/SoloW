@@ -71,3 +71,16 @@ they are not used by SoloW (it serves functions over HTTP), but should be firewa
 machine is reachable from a network. `inngest start` keeps its queue in an in-process Redis
 with periodic snapshots, so a crash can lose the last few seconds of queue state; acceptable
 for a single user, and an external `--redis-uri` / `--postgres-uri` is the upgrade path.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, as amended.** Two changes since acceptance, both recorded:
+[0030](./0030-review-gate-is-a-database-state.md) took human Gates out of the engine (a gate is a
+database state, and a decision starts the next run), and the amendment above moved the launchers
+from the Dev Server to the signed, self-hosted `inngest start`. Runs, retries and the five-hour
+quota park (`step.sleepUntil` in `task-run/terminal.ts`) still rely on the engine. Risk R-4 is
+real and handled outside it: sweeps in `apps/orchestrator/src/reconcile.ts` find runs the engine
+lost (orphaned, stranded at review, parked and never woken).

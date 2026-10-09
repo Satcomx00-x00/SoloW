@@ -19,7 +19,7 @@ Whichever way an Issue arrives, its Tasks and derived status are always SoloW's 
 
 ## User stories
 
-- As a Team Lead, I want to import Issues from our existing tracker, so harness work is
+- *(Later — team use.)* As a Team Lead, I want to import Issues from our existing tracker, so harness work is
   anchored to our real backlog, not a duplicate of it.
 - As a Solo Power User, I want to see all Tasks that belong to an Issue in one place, so I
   know the whole state of that work.

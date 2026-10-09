@@ -118,3 +118,13 @@ case — a read nobody invalidated, on a screen being revisited.
   two owners.
 - **Caching writes, or reading a write back from cache.** `scmSend` is untouched. A mutation is
   never revalidated and never coalesced.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** Provider reads go through `packages/scm/src/http.ts`, which revalidates with
+`If-None-Match` and serves a held body only on a `304`. Imported Issues are refreshed by a
+scheduled sync plus "Sync now", by polling — no webhooks — which leans on exactly this cheap
+revalidation.

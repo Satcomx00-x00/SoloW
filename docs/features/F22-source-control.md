@@ -4,6 +4,16 @@
 
 ## Summary
 
+> **As built (checked against the code on 2026-10-09; the rest of this specification was not
+> re-reviewed).** The panel is **read-only**: it lists the files from the diff captured at the
+> end of the harness's turn, with status letters, a diff per file and "viewed" marks. Stage,
+> unstage and discard (FR-6) are not wired — the orchestrator's git operations for them exist,
+> but no route from the web app reaches them ([0017](../decisions/0017-worktree-git-rpc.md),
+> review of 2026-10-09). So FR-7 does not hold as written: approval commits every change in
+> the worktree except copied setup files. Of FR-13, only the push exists, and not in the panel:
+> approving pushes the Task's branch and opens or updates its pull request
+> ([F10](./F10-review-approval.md)); pull and sync are not built.
+
 [F09](./F09-integrated-workspace.md) gives a Task a diff viewer. This feature turns it into the
 source-control surface every developer already knows — the one in their editor: files grouped by
 what git says about them, a status letter per row, a diff on click, and stage / unstage / discard

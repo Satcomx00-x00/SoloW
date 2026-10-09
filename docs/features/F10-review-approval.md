@@ -52,9 +52,15 @@ use.
   **not** offered: they look more granular and are worse, because they produce partially
   integrated Tasks — repository A landed, B was rejected — a state nothing in the model
   describes and nobody can act on.
-- **FR-12** No pull request is promised by that summary, because this build opens none. Opening
-  one is [F12](./F12-integrations.md)'s integration strategies; stating it here would be the
-  same failure the summary exists to prevent, pointed the other way.
+- **FR-12** *(Corrected 2026-10-09; it said this build opens no pull request, which stopped
+  being true with roadmap item A1.)* Approval ships. After committing, for each repository
+  connected through a GitHub, GitLab or Gitea Integration, SoloW pushes the Task's own branch
+  (never a hand-named one) and opens or updates its pull request; the Task links to it, named
+  in the provider's word. A repository with no remote, or no Integration, keeps the local
+  commit, and the Task says so ("Committed locally — not pushed"). If the push or the pull
+  request fails, the Task ends Failed with `delivery_failed`, the work committed, and offers
+  **Ship again** (push and open again, with no new harness run) or **Keep local** (finish
+  with the local commit).
 - **FR-12a** A Harness may nonetheless open one *itself* — it has a shell and the forge's CLI —
   and where it does, the Task page lists every such action as a link: the merge request or pull
   request, the pipeline, the commits, the release. The links are **read back out of the Session

@@ -14,7 +14,8 @@ environments that work happens in and against.
 **People (actors):**
 - **User** — creates Issues and Tasks, runs harnesses, designs Workflows, reviews changes.
 - **Reviewer** — approves, rejects, or requests changes; resolves Gates.
-- **Operator** — configures and runs a hosted instance.
+- **Operator** — configures and runs the installation; in 1.0, the User on their own machine.
+  Running a hosted instance for others is Later.
 
 **External systems (neighbours):**
 - **AI coding harnesses** — external command-line harness tools that SoloW drives to do the

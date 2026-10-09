@@ -74,3 +74,13 @@ path both drivers mount is what makes one code path serve both.
 - **Passing servers to Claude Code inside the plugin's `.mcp.json`.** Works, but `--mcp-config` is
   explicit and independent of plugin loading; two channels for one thing were not worth the
   coupling.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** `materializeLibraries` (`apps/orchestrator/src/harness/libraries.ts`) hands
+MCP servers and Skills to Claude Code as `--mcp-config` and `--plugin-dir`, and to ACP harnesses
+in `session/new`; the run loop passes the resolved libraries on every round
+(`task-run/round.ts`).

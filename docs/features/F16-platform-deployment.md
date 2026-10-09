@@ -4,10 +4,12 @@
 
 ## Summary
 
-SoloW runs as both a local single-user tool and a hosted multi-user service, from one
-product. Local deployment is trivial to start; hosted deployment adds shared access, teams,
-and multi-tenancy. Users own their compute and data in both modes, with no required cloud
-service and no telemetry.
+SoloW is designed to run as both a local single-user tool and a hosted multi-user service,
+from one product. **Only the local single-user deployment exists.** The hosted deployment —
+shared access, teams, invitations, roles, multi-tenancy and a production database — is
+**Later** ([0031](../decisions/0031-focus-on-the-solo-power-user.md)): an installation has exactly one account (the Owner, enforced in the
+database), and its database is SQLite. Users own their compute and data, with no required
+cloud service and no telemetry.
 
 ## Jobs served
 
@@ -17,9 +19,10 @@ service and no telemetry.
 
 - As a Solo Power User, I want to run SoloW on my own machine with minimal setup, so I
   can start immediately.
-- As a Team Lead, I want a shared, hosted instance my team can use together, so we
+- *(Later — team use.)* As a Team Lead, I want a shared, hosted instance my team can use together, so we
   collaborate.
-- As an Operator, I want to control who can access which Workspace, so shared use is safe.
+- *(Later — team use.)* As an Operator, I want to control who can access which Workspace, so
+  shared use is safe.
 
 ## Functional requirements
 
@@ -29,7 +32,11 @@ service and no telemetry.
 - **FR-2** Local deployment requires no external service and sends no telemetry
   (product [NFR-5](../product/03-product-requirements.md), [NFR-14](../product/03-product-requirements.md)).
 
-### Hosted deployment
+### Hosted deployment (Later)
+
+None of FR-3 to FR-6 is built. They record the intended hosted shape
+([0031](../decisions/0031-focus-on-the-solo-power-user.md)).
+
 - **FR-3** SoloW runs as a shared, multi-user service using the same product and
   capabilities as local deployment (product [NFR-13](../product/03-product-requirements.md)).
 - **FR-4** Hosted deployment supports multiple users organised into Workspaces, with each
@@ -43,9 +50,11 @@ service and no telemetry.
 - **FR-8** SoloW is distributed so a user can obtain and run it without a proprietary
   gatekeeper, consistent with its open-source nature.
 - **FR-9** A signed-in member can view and toggle their Workspace's feature flags from Settings
-  (issue #21), not only via `scripts/flag.ts` on the machine running the instance. Every flag is
-  ON by default; a flag exists so a capability can be switched *off* when it misbehaves, not so
-  it can be switched on before use. Turning `ff-core-program` off is confirmed before it takes
+  (issue #21), not only via `scripts/flag.ts` on the machine running the instance. Every flag but
+  one is ON by default; a flag exists so a capability can be switched *off* when it misbehaves,
+  not so it can be switched on before use. The exception is `ff-remote-environments`, which
+  ships OFF and hides the remote and cloud environment kinds until they have a driver
+  ([0031](../decisions/0031-focus-on-the-solo-power-user.md)). Turning `ff-core-program` off is confirmed before it takes
   effect: it is a self-lockout, disabling most of the rest of Settings along with the core Task
   loop for everyone in that Workspace until it is turned back on. Settings' own flags section
   stays reachable with every flag off, so the switch can always be reversed in the app; the
@@ -111,24 +120,25 @@ service and no telemetry.
 ## Non-functional requirements
 
 - **NFR-1** No feature is available only in one deployment mode except those that are
-  inherently multi-user (members and access control).
+  inherently multi-user (members and access control). *(Later, with hosting.)*
 - **NFR-2** In hosted deployment, access control is enforced on every action, not only in
-  the interface (product [NFR-6](../product/03-product-requirements.md)).
-- **NFR-3** Moving from local to hosted does not require re-learning the product.
+  the interface (product [NFR-6](../product/03-product-requirements.md)). *(Later.)*
+- **NFR-3** Moving from local to hosted does not require re-learning the product. *(Later.)*
 
 ## States & rules
 
-- A Workspace is the unit of tenancy and access in hosted deployment.
+- A Workspace is the unit of tenancy and access in hosted deployment (Later). Today the one
+  Owner has one Workspace.
 - Secrets and Profiles remain Workspace-scoped in both modes.
 - Appearance and new-Task defaults are **per member**, not per Workspace: two people sharing a
-  hosted Workspace each get their own.
+  hosted Workspace (Later) would each get their own.
 - Emptying a Workspace is **per Workspace**, not per member: it removes shared rows, and every
   member of that Workspace sees the result.
 
 ## Edge cases & failure handling
 
-- If a user loses access to a Workspace, in-flight work they started continues under the
-  Workspace's ownership; the user simply can no longer see or act on it.
+- (Later, with hosting.) If a user loses access to a Workspace, in-flight work they started
+  continues under the Workspace's ownership; the user simply can no longer see or act on it.
 - A reset requested from a tab whose Workspace was renamed after the page loaded is refused: the
   name it carries is compared against the stored one, so the gate fails closed rather than acting
   on a Workspace the requester was no longer looking at.

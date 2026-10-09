@@ -18,7 +18,7 @@ steerable without reading logs.
 
 ## User stories
 
-- As a Team Lead, I want to design a process where one harness plans, another implements, and
+- *(Later — team use.)* As a Team Lead, I want to design a process where one harness plans, another implements, and
   a third reviews, so my team runs it the same way every time.
 - As a user, I want to see, as a graph, where a running Workflow currently is, so I
   understand its state instantly.
@@ -111,8 +111,8 @@ it is how an operator gets from one shape to the next.
   the Step, skip it (if allowed), or cancel the Run.
 - If a Gate is never resolved, the Run remains paused and is clearly shown as waiting on a
   human, and can be reassigned or cancelled.
-- If a Harness Step exhausts a subscription quota, the Step parks and the Run waits, matching
-  Task Parked behaviour in [F06](./F06-authentication-billing.md).
+- If a Harness Step stops on what reads as an exhausted quota, the Step parks and the Run waits
+  a fixed five hours, matching Task Parked behaviour in [F06](./F06-authentication-billing.md).
 
 ## Out of scope
 

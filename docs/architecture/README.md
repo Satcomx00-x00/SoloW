@@ -18,7 +18,7 @@ behind each significant choice.
 | [04](./04-solution-strategy.md) | Solution Strategy | The core approach and the big choices |
 | [05](./05-building-blocks.md) | Building Blocks | The major parts and their responsibilities (C4 Container / Component) |
 | [06](./06-runtime-scenarios.md) | Runtime Scenarios | How the parts collaborate for key journeys |
-| [07](./07-deployment-view.md) | Deployment View | How the system runs locally and hosted |
+| [07](./07-deployment-view.md) | Deployment View | How the system runs locally (hosted is Later) |
 | [08](./08-crosscutting-concepts.md) | Cross-cutting Concepts | Concerns that span the whole system |
 | [09](./09-quality-requirements.md) | Quality Requirements | The quality goals and how they are judged |
 | [10](./10-risks-and-technical-debt.md) | Risks & Technical Debt | Known risks and areas to watch |

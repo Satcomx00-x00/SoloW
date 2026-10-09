@@ -33,3 +33,14 @@ a Run.
 - Negative: large graphs require careful layout and navigation to stay legible (risk noted in
   [F03](../features/F03-workflow-designer.md) NFR-2).
 - Realises [F03](../features/F03-workflow-designer.md).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** `@xyflow/react` (ReactFlow) draws both the Workflow editor's graph
+(`workflow-canvas.tsx`) and, on the Task page, the Steps of the Task's Workflow with each Step's
+state and cards under it (`task-board.tsx`). The canvas inside a Task is also called a "board",
+which collides with the Kanban board (finding E4); that is a naming problem, not one with this
+decision.

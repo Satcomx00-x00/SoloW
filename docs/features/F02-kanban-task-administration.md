@@ -16,7 +16,7 @@ harness work.
 
 ## User stories
 
-- As a Team Lead, I want to see all harness Tasks for an Issue on one board, so I understand
+- *(Later — team use.)* As a Team Lead, I want to see all harness Tasks for an Issue on one board, so I understand
   the state of that work.
 - As a Solo Power User, I want to drag a Task between columns to change its state, so I can
   manage work directly.
@@ -94,8 +94,9 @@ harness work.
   marked as queued.
 - If a Harness or Executor fails mid-run, the Task moves to Failed with the reason attached
   and can be retried.
-- If a subscription quota is exhausted while running, the Task moves to Parked rather than
-  Failed (see [F06](./F06-authentication-billing.md)).
+- If the harness stops with words that read as an exhausted quota or a rate limit, the Task
+  moves to Parked rather than Failed, and runs again after a fixed five-hour wait; no quota is
+  detected (see [F06](./F06-authentication-billing.md)).
 - If a sub-task's fork point no longer resolves before its first run — the parent's Session was
   purged, or its transcript changed behind the cursor — the run fails before a harness starts,
   saying which of the two happened. It does not silently start cold. A sub-task that has already

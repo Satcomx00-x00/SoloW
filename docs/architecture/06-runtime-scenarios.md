@@ -37,11 +37,13 @@ scenario is described as a sequence of responsibilities, not implementation.
 
 ## Scenario 4 — Subscription quota exhausted
 
-1. A Subscription-mode Harness exhausts its quota window mid-run (F06).
+1. A Harness stops mid-run with words that read as an exhausted quota or a rate limit (F06).
+   SoloW does not track the quota itself; it reads only the harness's message.
 2. The billing & credential guard moves the Task (or Workflow Step) to Parked, preserving all
    work.
-3. When the quota window resets, Parked work resumes automatically, in order and within the
-   concurrency cap; the user is not billed metered charges and loses no work.
+3. Five hours later (a fixed wait, not the provider's reset time) the run wakes, takes a slot
+   under the concurrency cap, and runs again in the same Worktree; the user is not billed
+   metered charges and loses no work. If the quota has not reset, it parks again.
 
 ## Scenario 5 — Synchronise an Issue and create a Task
 

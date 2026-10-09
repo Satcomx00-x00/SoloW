@@ -33,18 +33,18 @@ table because it exists, not because someone pressed a button.
 
 ## User stories
 
-- As a Team Lead, I want the table my team already plans in, so adopting SoloW does not
+- *(Later — team use.)* As a Team Lead, I want the table my team already plans in, so adopting SoloW does not
   mean keeping a second backlog.
-- As a Team Lead, I want it to work on GitLab, so the tool is not chosen by which host we use.
-- As a Team Lead, I want a status I change here to be the status my team sees in GitHub or
+- *(Later — team use.)* As a Team Lead, I want it to work on GitLab, so the tool is not chosen by which host we use.
+- *(Later — team use.)* As a Team Lead, I want a status I change here to be the status my team sees in GitHub or
   GitLab, so nobody has to look in two places.
 - As a Solo Power User, I want issues to arrive on their own, so a backlog is not a thing I
   maintain by importing.
-- As a Team Lead, I want an epic to show how much of it is done, so I can answer "how far in are
+- *(Later — team use.)* As a Team Lead, I want an epic to show how much of it is done, so I can answer "how far in are
   we" without opening five issues.
 - As a Reviewer, I want the pull request that closes an issue on the same row, so I can see what
   is actually in flight.
-- As a Team Lead, I want to say plainly what a provider cannot do, rather than discovering it
+- *(Later — team use.)* As a Team Lead, I want to say plainly what a provider cannot do, rather than discovering it
   when a save fails.
 
 ## Functional requirements

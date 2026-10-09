@@ -8,6 +8,12 @@ An Executor is where a Harness actually runs. SoloW supports several execution
 environments so users can run harnesses locally for convenience or offload heavy work to
 containers, remote machines, or the cloud — all managed from the same control plane.
 
+> **What is built:** the local executor (the user's own machine, for trusted agents only) and
+> the container executor (Docker). **Remote (SSH) and cloud environments are Later**
+> ([0031](../decisions/0031-focus-on-the-solo-power-user.md)): their profile shapes exist, but neither has a driver, so a Task on one fails
+> before a harness starts; their kinds are hidden behind `ff-remote-environments`, which ships
+> OFF.
+
 ## The `Executor` interface (issue #1)
 
 Before a second Executor kind existed, SoloW adopted one interface every kind implements —
@@ -264,8 +270,8 @@ schema declares, then the shared prepare script and environment repeater.
   trivial.
 - As a user, I want to run a resource-heavy Task in a container, so it does not slow my
   machine.
-- As an Operator, I want harnesses to run on a designated remote host, so compute is where it
-  should be.
+- *(Later.)* As an Operator, I want harnesses to run on a designated remote host, so compute
+  is where it should be.
 
 ## Functional requirements
 

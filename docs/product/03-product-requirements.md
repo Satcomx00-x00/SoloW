@@ -12,7 +12,8 @@ whole product. Detailed behaviour lives in the individual [feature specification
 - Organise all harness work around Issues, administered as Tasks on a Kanban board.
 - Let users design and monitor multi-harness processes as visual Workflows.
 - Support both subscription and API-key billing per harness.
-- Run identically as a local single-user tool and as a hosted multi-user service.
+- Run identically as a local single-user tool and as a hosted multi-user service. *1.0 is the
+  local single-user tool; the hosted multi-user service is Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)).*
 
 ## Non-goals
 
@@ -62,7 +63,7 @@ requirements but may not relax these.
   encrypted and are never displayed after entry.
 - **NFR-5** The product functions with no outbound telemetry.
 - **NFR-6** In hosted deployments, a user can only see and act on the Workspaces they are
-  granted access to.
+  granted access to. *(Later: there is one account per installation.)*
 - **NFR-7** Credentials are never exposed to the code a Harness runs.
 
 ### Performance & scale
@@ -71,8 +72,10 @@ requirements but may not relax these.
   concurrency limits and available Executors.
 
 ### Cost control
-- **NFR-10** Subscription-billed Harnesses respect a configurable concurrency cap, and quota
-  exhaustion parks work rather than failing it or silently switching to metered billing.
+- **NFR-10** Subscription-billed Harnesses respect a configurable concurrency cap, and a
+  harness that stops on an exhausted quota parks its work for a fixed five hours rather than
+  failing it or silently switching to metered billing. Quota is not detected and there is no
+  spending limit (Later).
 
 ### Usability
 - **NFR-11** The state of any Task or Run is understandable at a glance without reading raw
@@ -81,6 +84,7 @@ requirements but may not relax these.
 
 ### Portability
 - **NFR-13** The same product runs locally and hosted, differing only in configuration.
+  *(Later: only the local deployment exists.)*
 - **NFR-14** No feature depends on a proprietary third-party service being present.
 
 ## Success metrics

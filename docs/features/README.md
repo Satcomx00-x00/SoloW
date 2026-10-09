@@ -1,6 +1,6 @@
 # Feature Specifications
 
-**Status:** Draft · **Owner:** Product · **Last reviewed:** 2026-08-17
+**Status:** Draft · **Owner:** Product · **Last reviewed:** 2026-10-09
 
 This folder contains one specification per feature. Each is business-level: it describes
 observable behaviour, not implementation. Every specification follows the same template so
@@ -9,7 +9,10 @@ readers always know where to find each kind of information.
 ## Feature index and status
 
 Maturity: **Core** (required for parity with comparable tools) · **Edge** (SoloW
-differentiator) · **Later** (planned after first release).
+differentiator) · **Later** (planned after first release). What is Later follows
+[Decision 0031](../decisions/0031-focus-on-the-solo-power-user.md): SoloW 1.0 is for the solo
+power user on their own machine. The [Feature Comparison](../product/06-feature-comparison.md)
+says, row by row, what is built.
 
 | ID | Feature | Maturity | Serves jobs |
 |----|---------|----------|-------------|
@@ -19,16 +22,16 @@ differentiator) · **Later** (planned after first release).
 | [F04](./F04-harness-orchestration.md) | Multi-Harness Orchestration | Core | J1, J7 |
 | [F05](./F05-harness-executor-profiles.md) | Harness & Executor Profiles | Core | J1, J6, J7 |
 | [F06](./F06-authentication-billing.md) | Authentication & Billing Modes | Edge | J6 |
-| [F07](./F07-execution-environments.md) | Execution Environments | Core | J7 |
+| [F07](./F07-execution-environments.md) | Execution Environments | Core (local, container) · Later (remote, cloud) | J7 |
 | [F08](./F08-workspaces-repositories.md) | Worktrees & Repositories | Core | J1 |
 | [F09](./F09-integrated-workspace.md) | Integrated Review Workspace | Core | J5 |
 | [F10](./F10-review-approval.md) | Review & Approval | Core | J5 |
 | [F11](./F11-sessions-conversations.md) | Sessions & Conversations | Core | J8 |
 | [F12](./F12-integrations.md) | External Integrations | Core | J2, J9 |
-| [F13](./F13-collaboration-sharing.md) | Collaboration & Sharing | Core | J9 |
-| [F14](./F14-analytics-reporting.md) | Analytics & Reporting | Core | J10 |
-| [F15](./F15-notifications.md) | Notifications | Core | J4, J9 |
-| [F16](./F16-platform-deployment.md) | Platform, Deployment & Multi-Tenancy | Core / Edge | J10 |
+| [F13](./F13-collaboration-sharing.md) | Collaboration & Sharing | Later (Workflow export/import only is built) | J9 |
+| [F14](./F14-analytics-reporting.md) | Analytics & Reporting | Core (Outcomes page) · Later (the rest) | J10 |
+| [F15](./F15-notifications.md) | Notifications | Later (an in-app notice of failed or stuck runs is built) | J4, J9 |
+| [F16](./F16-platform-deployment.md) | Platform, Deployment & Multi-Tenancy | Core / Edge (local) · Later (hosted, multi-user) | J10 |
 | [F17](./F17-security-secrets.md) | Security & Secrets | Core | J6, J10 |
 | [F18](./F18-onboarding-setup-workflow.md) | First-Run Onboarding & Setup Workflow | Core | J6, J10 |
 | [F19](./F19-extension-contributions.md) | Extension Contributions | Core | J4, J10 |

@@ -73,3 +73,13 @@ over a sync layer for the same reason.
 **Fold the write into `issues`.** One fewer capability, and no way to describe a provider that
 can be read and not written. Rejected for the reason [0016](./0016-integration-provider-registry.md)
 exists: a capability the registry cannot express is a capability the product will assume.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** `issueWrites` is a capability separate from `issues` in `packages/scm`
+(GitHub, GitLab, Gitea); an imported Issue is edited and commented on at the provider and read
+back (`issue.updateExternal`, `issue.comment`), and Issues can also be created on the provider
+(`issue.createOnProvider`).

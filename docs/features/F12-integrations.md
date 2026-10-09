@@ -38,7 +38,7 @@ documents, so there is no second definition of any operation to drift. It sits b
 
 ## User stories
 
-- As a Team Lead, I want to import Issues from our existing tracker, so SoloW
+- *(Later — team use.)* As a Team Lead, I want to import Issues from our existing tracker, so SoloW
   reflects our real backlog instead of a second, disconnected one.
 - As a Reviewer, I want to see a Task's repository's open change requests and branches
   without leaving SoloW, so I have the full picture in one place.

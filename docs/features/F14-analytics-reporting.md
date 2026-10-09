@@ -14,7 +14,7 @@ billing.
 
 ## User stories
 
-- As a Team Lead, I want to see how many Tasks we complete and how, so I understand our
+- *(Later — team use.)* As a Team Lead, I want to see how many Tasks we complete and how, so I understand our
   throughput.
 - As an Operator, I want to see how harnesses split between subscription and API-key billing,
   so I manage cost.
@@ -73,7 +73,8 @@ sidebar's Workspace group. It reads only what the product already records (`task
 - **Time to first pull request**: from the Workspace's creation to the first Task shipped as one.
 
 Deleted Tasks are left out of every figure (they are purged after the retention window). Weeks
-start on Monday, in UTC. FR-2, FR-4, FR-5 and FR-6 beyond the time window are not built.
+start on Monday, in UTC. FR-2, FR-4, FR-5 and FR-6 beyond the time window are not built; they
+are Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)).
 
 ## Out of scope
 

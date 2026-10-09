@@ -75,3 +75,13 @@ documented contract.
 - Issue #15 — GitHub integration — and the provider interface GitLab is a driver for
 - `packages/scm/src/types.ts` — the `ChangeProvider` interface
 - `packages/scm/src/github.ts`, `packages/scm/src/gitlab.ts` — the two drivers
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** `packages/scm` drives GitHub and GitLab, and since Gitea, through their
+APIs with a Personal Access Token stored as an `scm_pat` Secret. The same drivers now open and
+update pull requests on approval (`upsertChangeRequest`, called from
+`apps/orchestrator/src/delivery.ts`), which this decision left as future work.

@@ -40,3 +40,19 @@ The orchestrator's `Bun.serve` now exposes the HTTP surface the interactive appl
 to actually reach it: `POST /events` (where the application's event emitter lands) alongside
 the existing WebSocket hub, on the same port. See [Decision 0004](./0004-durable-orchestration-engine.md)'s
 own status note for what receives those events.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds for the local half; the hosted half is Later.**
+
+- Two parts, as decided: `apps/web` (the interactive application) and `apps/orchestrator` (a
+  long-lived Bun service that supervises harnesses, worktrees and the stream). Since
+  2026-10-08 the launcher supervises them, with the run engine, as three services that restart
+  on their own.
+- "The same product able to run hosted later" has not been exercised: an installation has one
+  account and the Postgres driver is not wired. [0031](./0031-focus-on-the-solo-power-user.md)
+  moves hosting to Later, so the expected consequence "the orchestrator can scale independently
+  when hosted" is untested rather than refuted.

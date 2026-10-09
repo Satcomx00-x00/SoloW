@@ -19,10 +19,11 @@ store choice.
 > store; harnesses run in the chosen Executors; the user works entirely on their own hardware.
 
 > **Implementation note (2026-08-20):** the durable-execution engine [Decision 0004](../decisions/0004-durable-orchestration-engine.md)
-> chose (Inngest) runs locally as its own Dev Server process, polled by and forwarding runs
-> into the Orchestration Component's `/api/inngest` endpoint. It is an implementation detail
-> of that component, not a fourth deployable unit in this model — hosted deployments point the
-> same client at Inngest Cloud instead.
+> chose (Inngest) runs locally as its own process — since 2026-10-08 the self-hosted, signed
+> `inngest start`, no longer the Dev Server (0004's amendment) — calling into the Orchestration
+> Component's `/api/inngest` endpoint. It is an implementation detail of that component, not a
+> fourth deployable unit in this model. A hosted deployment (Later) would point the same client
+> at a shared engine instead.
 
 ## Starting a local deployment
 
@@ -71,11 +72,15 @@ running, and only one that keeps failing stops the stack, so that a service mana
 it ([Running as a Service](../operations/running-as-a-service.md)).
 
 > **Implementation note (2026-09-04):** ports default to 5000 (application), 5001 (orchestrator)
-> and 8288 (Inngest Dev Server), and each moves independently — `--port`, `--ws-port` and
+> and 8288 (the Inngest engine), and each moves independently — `--port`, `--ws-port` and
 > `--inngest-port`. Package managers — Homebrew, Scoop, a global npm install — are wrappers around
 > this same entry point rather than separate builds.
 
-## Hosted deployment (multi-user)
+## Hosted deployment (multi-user) — Later
+
+> **Not built.** Hosting for teams is Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)). An installation has exactly one
+> account, the database is SQLite only, and remote and cloud Executors have no driver. This
+> section records the intended shape.
 
 - The Interactive Application and the Orchestration Component run as a shared service;
   multiple users connect to it.
@@ -95,7 +100,7 @@ it ([Running as a Service](../operations/running-as-a-service.md)).
 - The only differences are configuration: which store is used, whether multiple users and
   access control are present, and where Executors run.
 
-## Operator responsibilities in hosted mode
+## Operator responsibilities in hosted mode (Later)
 
 - Managing members and their access to Workspaces (F16).
 - Providing and rotating secrets safely (F17).

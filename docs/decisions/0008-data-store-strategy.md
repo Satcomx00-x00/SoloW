@@ -32,3 +32,14 @@ across both.
   surface (risk R-6).
 - Realises [F16](../features/F16-platform-deployment.md) and the
   [deployment view](../architecture/07-deployment-view.md).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds as a design constraint; only one of the two stores exists.** SQLite is the only
+store wired (`packages/db/drizzle.config.ts`); `createDb()` refuses
+`SOLOW_DB_DRIVER=postgres` ("not wired in v1"). Hosting, and
+with it the shared store, is Later under [0031](./0031-focus-on-the-solo-power-user.md). The
+schema has kept to one model scoped by Workspace, so the decision is still cheap to honour.

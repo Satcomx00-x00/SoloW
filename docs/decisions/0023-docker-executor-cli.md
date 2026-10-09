@@ -442,3 +442,15 @@ two Repositories and compares the real mount sets in both directions, and
 - **Published ports and preview URLs.** Docker fixes port publishing at container creation while
   `forward()` is handed a port at call time; reconciling those is #35's problem.
 - **Rootless and remote daemons.** Both work through the same CLI today and neither is tested here.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, and became the default choice.** `apps/orchestrator/src/executor/docker.ts`
+drives one container per Task through the `docker` CLI, and CI runs a live Docker smoke test and
+the executor contract against a real daemon. Since 2026-10-08 a new Executor Profile starts as
+Docker when Docker answers, a container receives one credential and none of the control plane's
+state, and mounts of the database or its keys are refused. One gap: the Task terminal is not
+available on this executor (`openTerminal` is implemented by the local executor only).

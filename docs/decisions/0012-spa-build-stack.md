@@ -59,3 +59,11 @@ does not use Next.js.
 - Refines the "application" part of [Decision 0002](./0002-technology-stack.md); realises
   [Decision 0010](./0010-spa-interactive-application.md) and
   [Decision 0011](./0011-frontend-backend-protocol.md).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: superseded, as recorded.** The web app is Next.js ([0013](./0013-nextjs-web-framework.md));
+nothing of the Vite build remains.

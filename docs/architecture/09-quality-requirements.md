@@ -13,7 +13,7 @@ It complements the product-wide non-functional requirements in
    without intent.
 3. **Cost trustworthiness** — billing mode is honoured exactly.
 4. **Usability** — state is understandable at a glance; review is easy and safe.
-5. **Portability** — one product, local and hosted.
+5. **Portability** — one product, local and hosted (hosted is Later).
 6. **Performance & scale** — responsive under many concurrent Tasks.
 
 ## Quality scenarios
@@ -32,7 +32,8 @@ Each scenario names a stimulus and the response that constitutes success.
 - **Q-Usability-1** *When a user looks at a Board or Workflow monitor,* they can tell the
   state of any Task or Run without reading raw logs.
 - **Q-Portability-1** *When the product is deployed hosted instead of local,* every feature
-  behaves identically except those inherently multi-user.
+  behaves identically except those inherently multi-user. *(Later: there is no hosted
+  deployment yet.)*
 - **Q-Performance-1** *When many Tasks run in parallel,* the Board and live views update in
   near real time.
 - **Q-Performance-2** *When a sync polls a repository nothing has changed in,* it transfers no
