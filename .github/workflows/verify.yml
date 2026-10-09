@@ -208,7 +208,17 @@ jobs:
       - name: Install Chromium for Playwright
         run: bunx playwright install chromium
 
-      # Each shard boots its own orchestrator and Next dev server (see
+      # The suite serves a production build of the web app (playwright.config.ts), and Next's
+      # compiler cache is what makes that build a minute rather than several: restored from the
+      # last run with the same dependencies, whatever sources changed since.
+      - name: Cache the e2e build's compiler cache
+        uses: actions/cache@v4
+        with:
+          path: apps/web/.next-e2e/cache
+          key: next-e2e-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('apps/web/src/**', 'packages/*/src/**') }}
+          restore-keys: next-e2e-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+
+      # Each shard boots its own orchestrator and builds and serves the web app (see
       # playwright.config.ts webServer) and runs serially on one database —
       # the isolation spec launches concurrent Tasks on purpose.
       - name: E2E suite, shard ${{ matrix.shard }}/3
@@ -266,6 +276,14 @@ jobs:
       # The browser binary only, for the reason given in the e2e job above.
       - name: Install Chromium for Playwright
         run: bunx playwright install chromium
+
+      # The same compiler cache as the e2e job's, and for the same reason.
+      - name: Cache the e2e build's compiler cache
+        uses: actions/cache@v4
+        with:
+          path: apps/web/.next-e2e/cache
+          key: next-e2e-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('apps/web/src/**', 'packages/*/src/**') }}
+          restore-keys: next-e2e-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
 
       - name: Control check, ${{ matrix.spec }}
         run: make control-check CONTROL_SPEC=e2e/control/${{ matrix.spec }}.spec.ts

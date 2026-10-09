@@ -101,8 +101,6 @@ export const E2E_ENV = {
    * `scripts/start.sh` stack is serving from the same checkout — see `next.config.mjs`.
    */
   SOLOW_NEXT_DIST_DIR: ".next-e2e",
-  /** A route compiled once stays compiled for the whole run — see `next.config.mjs`. */
-  SOLOW_NEXT_KEEP_ROUTES: "1",
 } as const;
 
 const git = (args: string[], cwd?: string) =>

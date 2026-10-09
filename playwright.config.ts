@@ -60,7 +60,23 @@ export default defineConfig({
       env,
     },
     {
-      command: `bunx --bun next dev --port ${PORTS.web} --hostname 127.0.0.1`,
+      /*
+       * A production build, served — the app that ships, not `next dev`.
+       *
+       * The suite ran on `next dev` and spent its life compensating: a route compiled on its first
+       * visit (10–40 s on a loaded host) inside whichever walk got there first, so specs warmed
+       * routes in hooks, the server was told to keep what it compiled, and budgets grew around
+       * the compiles. Worse than slow, it failed in a way no spec could fix: intermittently, deep in
+       * a full run, the server's HTML and the browser's render disagreed about the tree above
+       * the shell — React's ids shifted (`radix-_R_5aj9…` served, `_R_1akp…` rendered) — and the
+       * hydration error's toast sat over the sidebar's Settings link, while a probe of the same
+       * server minutes later saw nothing. Dev-only machinery (Next's segment-explorer wrappers)
+       * is the likely cause, not a proven one; a build has neither it nor the compiles.
+       *
+       * What is given up is dev-only: React's attribute-level hydration diffs and duplicate-key
+       * warnings do not print in production. The component tests keep the key checks.
+       */
+      command: `bunx --bun next build && bunx --bun next start --port ${PORTS.web} --hostname 127.0.0.1`,
       cwd: "apps/web",
       // `/projects` — the app's real front door. The old `/board` readiness URL outlived the
       // route it named: boards moved under `/projects/:id`, the URL began answering 404, and
@@ -68,7 +84,8 @@ export default defineConfig({
       // ran. Root-adjacent and unparameterised on purpose, so this cannot rot the same way.
       url: `http://127.0.0.1:${PORTS.web}/projects`,
       reuseExistingServer: false,
-      timeout: 180_000,
+      // The build: about a minute with Next's cache warm, several cold on a loaded runner.
+      timeout: 15 * 60_000,
       env,
     },
   ],

@@ -12,11 +12,9 @@ import {
   createTask,
   launchTask,
   launchToReview,
-  NO_SUCH_ID,
   openReview,
   openTask,
   trpc,
-  warmRoutes,
 } from "../support/flows.js";
 import { seedIssue } from "../support/seed.js";
 
@@ -62,31 +60,14 @@ async function split(page: Page, title: string, opts: { fork?: boolean } = {}): 
 }
 
 test.describe("sub-tasks", () => {
-  // Each of these walks several Tasks through real runs and page loads, and on the e2e
+  // Each of these walks several Tasks through real runs and page loads, and on the suite's former
   // `next dev` a page load costs 5–10 s and a tRPC batch 1–3 s: the runner's 180 s default
   // cut them off while still passing. The budget follows the walk, as the control check's does,
   // and is sized the way the suite's own default is (playwright.config.ts): the worst measured
   // case plus headroom. On the shared dev host (2026-10-08) the cold-split walk took 3.7 min
-  // alone and 6.1 min under load — past the 6 min this was — and, with the routes warmed below,
+  // alone and 6.1 min under load — past the 6 min this was — and, with its routes warmed first,
   // 4.6 min at a load average of 7–8. Eight minutes is that 6.1 plus a third.
   test.describe.configure({ timeout: 8 * 60_000 });
-
-  // Every route the walks visit, compiled before the first walk starts, so a first visit's
-  // compile (10–20 s a route, more on a loaded host) is paid on this hook's clock rather than
-  // inside a walk's budget.
-  test.beforeAll(async ({ browser }, testInfo) => {
-    testInfo.setTimeout(5 * 60_000);
-    // A hook's page does not get the config's `use`, so the base URL is passed on by hand.
-    const { baseURL } = testInfo.project.use;
-    const page = await browser.newPage(baseURL ? { baseURL } : {});
-    await warmRoutes(page, [
-      "/settings?section=repositories",
-      `/issues/${NO_SUCH_ID}`,
-      `/task/${NO_SUCH_ID}`,
-      "/unassigned",
-    ]);
-    await page.close();
-  });
 
   test("a split off a run Task inherits its setup and is briefed with the parent's transcript", async ({
     page,
@@ -239,11 +220,7 @@ test.describe("sub-tasks", () => {
     await expect(crumbs.getByRole("link", { name: parentTitle })).toBeVisible();
     await expect(crumbs.getByRole("link", { name: childTitle })).toBeVisible();
 
-    // Delete the root. None of them ever ran, so it goes on the press with no dialog. Where the
-    // delete lands is the unassigned list, visited once first for the reason `workspace.spec.ts`
-    // gives: under the e2e `next dev` its first compile takes long enough that the page's own
-    // push back to it arrives in the middle of whatever the test does next.
-    await page.goto("/unassigned");
+    // Delete the root. None of them ever ran, so it goes on the press with no dialog.
     await page.goto(`/task/${parentId}`);
     await page.getByRole("button", { name: `Delete ${parentTitle}` }).click();
     await page.waitForURL((url) => !url.pathname.startsWith("/task/"));
