@@ -203,7 +203,7 @@ const FAILURE_REASONS: Record<
   },
   // The one failure where the work is *partly landed* (issue #70 AC-4).
   [PARTIAL_INTEGRATION_REASON]: {
-    label: "Partly integrated",
+    label: "Partly committed",
     tone: "failed",
     icon: TriangleAlert,
     detail:

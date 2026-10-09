@@ -129,7 +129,7 @@ export function groupChanges(
  * will not happen — the exact failure this summary exists to prevent, pointed the other way.
  */
 export function summariseConsequences(groups: readonly ReviewGroup[]): string {
-  if (groups.length === 0) return "Nothing to integrate — the harness proposed no changes.";
+  if (groups.length === 0) return "Nothing to commit — the harness proposed no changes.";
 
   const repositories = new Set(groups.map((g) => g.repositoryId ?? g.key)).size;
   const branches = new Set(groups.map((g) => g.branch).filter((b): b is string => b !== null)).size;

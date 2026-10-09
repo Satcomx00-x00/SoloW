@@ -178,9 +178,9 @@ export function workflowColumns(steps: readonly WorkflowStepDto[]): readonly Boa
         textClassName: chrome.textClassName,
         barClassName: chrome.barClassName,
         tintClassName: chrome.tintClassName,
-        // Whatever the gate, the last approval is still a person's: nothing is integrated
+        // Whatever the gate, the last approval is still a person's: nothing ships
         // without one, which an "it moves on" hint must not seem to deny.
-        hint: `${GATE_NAME[gate]}: ${GATE_DESCRIPTION[gate]}${gate === "human" ? "" : " Nothing is integrated until you approve."}`,
+        hint: `${GATE_NAME[gate]}: ${GATE_DESCRIPTION[gate]}${gate === "human" ? "" : " Nothing ships until you approve."}`,
         droppable: false,
       };
     }),
