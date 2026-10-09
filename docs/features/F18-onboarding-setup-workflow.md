@@ -90,6 +90,11 @@ work share one mental model.
 - If the verification Task fails, the Setup Workflow surfaces the reason and points the user
   to the step likely responsible (for example, an unavailable Executor or an unauthenticated
   harness), rather than declaring the Workspace Ready.
+- The test runs where the Workspace's Tasks will run — the executor a new Task would get. When
+  the setup put Claude in a container, the test runs in a throwaway container of the same image
+  after the same preflight a Task gets ([F07](./F07-execution-environments.md#launches-that-are-not-a-tasks-run-roadmap-b4)),
+  so a missing Docker daemon or image reads as "SoloW couldn't start the isolated container", and
+  Claude missing from the image is not reported as Claude missing from the machine.
 
 ## Out of scope
 

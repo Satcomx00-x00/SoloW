@@ -170,6 +170,16 @@ deployment label would eat a *different* orchestrator's live run when a dev inst
 share a daemon. The containers are deliberately not `--rm`, so a crash leaves the reaper something
 to find and an operator some evidence.
 
+A later addition (roadmap B4) gave the label set a second **role**. A Task's container is
+`solow.role=session`; the Brief tab's Explain and the guided setup's test, when the Task's Executor
+Profile is Docker, run in a `solow.role=oneshot` container named for the *request*
+(`solow-oneshot-<sha256(deployment:oneshot:request)[0..12]>`) and removed in the request's own
+`finally`. Every lookup is scoped by role, so neither kind can adopt or remove the other, and the
+reaper enumerates the two separately: a one-shot has no Task row to read, so it is judged by its
+`ORCHESTRATOR_EPOCH` claim alone (a predecessor's claim means its request died with it) and by an
+hour's ceiling on its age (a removal this process failed to make). See F07, "Launches that are not
+a Task's run".
+
 ### The environment travels on the exec's own stdin
 
 Not in argv, not in a file, and not anywhere `docker inspect` can read it. The variables arrive as

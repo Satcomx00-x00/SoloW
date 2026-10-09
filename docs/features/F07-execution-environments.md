@@ -116,9 +116,13 @@ as useful as an image with a harness in it. SoloW's is `docker/executor/Dockerfi
 - **Naming another image.** `SOLOW_EXECUTOR_IMAGE` on the orchestrator names the image the setup
   looks for (and the build tags, when set for it too). It is looked up, never pulled: a local tag
   has no registry, and the setup chooses a container only when the daemon already has the image.
-- **Not yet.** No registry publishes it; every machine builds its own. And the setup's test run
-  still probes the harness on the host, not in the container, so it can report Claude Code
-  missing on a host that does not have it even though the container does.
+- **Not yet.** No registry publishes it; every machine builds its own.
+- **The setup's test runs in it.** The test asks the orchestrator to probe the executor a new
+  Task would get (`executorProfileId` on `POST /probe-agent`), so a setup that put Claude in a
+  container is tested in a one-shot container of that image — see "Launches that are not a
+  Task's run" below. A missing or unusable image fails the test as "SoloW couldn't start the
+  isolated container", and a harness missing from the image says so rather than asking the Owner
+  to install Claude on the host.
 - **Never-ask on the local executor is a deliberate choice.** Wherever a Task is created or a batch
   launched, the pairing of a `bypassPermissions` Harness Profile with a `local` Executor shows an
   alert ("This run is not isolated") before the Owner confirms. There is no server-side refusal:
@@ -170,6 +174,33 @@ a user gets.
   immediately, and the reconciliation sweep removes containers a crashed orchestrator left behind
   — identified by their labels, and only once the Task and the harness registry both agree no run
   still holds them.
+
+### Launches that are not a Task's run (roadmap B4)
+
+Two things start a harness outside any run: the Brief tab's **Explain** (`POST /explain`) and the
+guided setup's **test** (`POST /probe-agent` with `turn` and `executorProfileId`). Both run where
+the Task — or, for the setup, a new Task — runs: on the host for a Local Executor Profile, and for
+a Docker one in a **one-shot container** built by the same factory and checked by the same
+preflight as a run (`openOutOfBandExecutor` in `executor/factory.ts`), so the image, limits,
+prepare script, utilities and harness binary are the run's, and so is every refusal. The
+credential reaches the harness as it does on a run — on the exec's stdin, under the container's
+own `HOME`.
+
+- **It is never the Task's container.** A one-shot is labelled `solow.role=oneshot` and named for
+  its request, not its Task, so it can neither adopt a running Task's container nor be found and
+  removed by that Task's own run: every container lookup is scoped by role. It mounts only the
+  request's scratch directory (under `SOLOW_WORKTREE_ROOT`, where the mount guard always admits
+  it) plus the Profile's own `mounts` — no worktree, no repository, no transcript store.
+- **It is removed when the request ends,** in the request's own `finally`, scratch directory and
+  all.
+- **The sweep removes one nothing will come back for.** A one-shot has no Task row or registry
+  entry to be evidence of life, so the reaper judges it on its own enumeration by its claim: one
+  this process claimed is a request in flight and is left alone; one a crashed predecessor
+  claimed is removed after the twenty-second grace; and one older than an hour
+  (`ONE_SHOT_MAX_AGE_MS`) is removed whoever claims it, which covers a removal this process
+  itself failed to make.
+- **Settings' "Test" is unchanged.** Probing a Harness Profile on its own names no executor, and
+  stays a probe on the orchestrator's host.
 
 ### The isolation that holds, and where it stops
 
