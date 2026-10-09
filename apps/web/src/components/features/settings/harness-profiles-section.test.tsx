@@ -179,7 +179,10 @@ describe("HarnessProfilesSection", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("AGENT_PROFILE_IN_USE");
+      // The plain sentence, never the wire code (E6).
+      expect(screen.getByRole("alert").textContent).toContain(
+        "A task or a workflow step still uses this harness profile.",
+      );
     });
   });
 });
@@ -288,7 +291,9 @@ describe("HarnessProfilesSection — harness catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add to catalog" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("AGENT_CATALOG_KEY_TAKEN");
+      expect(screen.getByRole("alert").textContent).toContain(
+        "A harness with that key already exists.",
+      );
     });
   });
 });
