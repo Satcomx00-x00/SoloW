@@ -14,7 +14,7 @@ const calls: { signIn: unknown[]; signUp: unknown[]; replaced: string[] } = {
   signUp: [],
   replaced: [],
 };
-let nextResult: { error?: { message: string } } = {};
+let nextResult: { error?: { code?: string; message: string; status?: number } } = {};
 
 mock.module("@/lib/auth-client", () => ({
   signIn: {
@@ -46,7 +46,7 @@ mock.module("next/navigation", () => ({
   useParams: () => ({}),
 }));
 
-const { SignInForm } = await import("./sign-in-form");
+const { SignInForm, describeAuthFailure } = await import("./sign-in-form");
 
 beforeEach(() => {
   calls.signIn = [];
@@ -103,15 +103,72 @@ describe("SignInForm — returning owner", () => {
     expect(calls.signUp).toHaveLength(0);
   });
 
-  it("shows why a sign-in failed and stays put", async () => {
-    nextResult = { error: { message: "Invalid email or password" } };
+  it("shows why a sign-in failed, in words, and stays put", async () => {
+    nextResult = {
+      error: {
+        code: "INVALID_EMAIL_OR_PASSWORD",
+        message: "Invalid email or password",
+        status: 401,
+      },
+    };
     render(<SignInForm ownerExists />);
 
     fill("ada@solow.test", "wrong-password-here");
     fireEvent.click(screen.getByRole("button", { name: /Sign in/ }));
 
-    expect((await screen.findByRole("alert")).textContent).toBe("Invalid email or password");
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "That email and password don't match the owner account. Check both, then try again.",
+    );
     // Navigating on a failed sign-in would bounce the user straight back, hiding the reason.
     expect(calls.replaced).toEqual([]);
+  });
+});
+
+describe("describeAuthFailure", () => {
+  const origin = "http://127.0.0.1:5460";
+
+  it("turns BetterAuth's bare 'Invalid origin' into the address to use and the setting to change", () => {
+    const text = describeAuthFailure(
+      { code: "INVALID_ORIGIN", message: "Invalid origin", status: 403 },
+      "sign-up",
+      origin,
+    );
+    expect(text).toContain(origin);
+    expect(text).toContain("SOLOW_WEB_URL");
+    expect(text).not.toContain("Invalid origin");
+  });
+
+  it("says a second owner account cannot be made, and how to get in instead", () => {
+    for (const code of ["USER_ALREADY_EXISTS", "FAILED_TO_CREATE_USER"]) {
+      expect(describeAuthFailure({ code, status: 422 }, "sign-up", origin)).toMatch(
+        /already has its owner account.*Reload the page to sign in/,
+      );
+    }
+  });
+
+  it("names the password rule rather than BetterAuth's 'Password too short'", () => {
+    expect(
+      describeAuthFailure({ code: "PASSWORD_TOO_SHORT", status: 400 }, "sign-up", origin),
+    ).toBe("That password is too short. Use at least 12 characters.");
+  });
+
+  it("reads the rate limiter by its status, since it answers with no code", () => {
+    expect(
+      describeAuthFailure(
+        { message: "Too many requests. Please try again later.", status: 429 },
+        "sign-in",
+        origin,
+      ),
+    ).toBe("Too many attempts in a short time. Wait a minute, then try again.");
+  });
+
+  it("never echoes an unrecognised message", () => {
+    const text = describeAuthFailure(
+      { code: "SOMETHING_NEW", message: "Internal detail", status: 400 },
+      "sign-in",
+      origin,
+    );
+    expect(text).not.toContain("Internal detail");
+    expect(text).toContain("try again");
   });
 });
