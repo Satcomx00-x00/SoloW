@@ -8,6 +8,7 @@ import {
   deleteWorkflow,
   expectTaskDeleted,
   gateButton,
+  NO_SUCH_ID,
   openTask,
   openTaskReadyToDelete,
   openWorkspaceTab,
@@ -15,6 +16,7 @@ import {
   showStepOnBoard,
   stepHeader,
   trpc,
+  warmRoutes,
 } from "../support/flows.js";
 
 /**
@@ -152,6 +154,10 @@ test.describe("control check — the main line of the product, end to end", () =
     });
 
     await test.step("draw a two-step Workflow on the canvas", async () => {
+      // The new Workflow's page is first reached by Create's client navigation, and under the e2e
+      // `next dev` that navigation waits out the route's first compile inside `toHaveURL` — seen
+      // at 28 s of its 30 on a quiet host. Compiled first, as `/projects/<id>` is above.
+      await warmRoutes(page, [`/workflows/${NO_SUCH_ID}`]);
       await page.goto("/workflows");
       // The create form opens by itself once the list has loaded empty, so a click read off the
       // loading state can land after that and close it again. Ask for the field, and only
