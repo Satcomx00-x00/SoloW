@@ -45,3 +45,12 @@ of [Decision 0002](./0002-technology-stack.md) is delivered.
   performance are not relevant trade-offs.
 - Affects the [building block view](../architecture/05-building-blocks.md); does not change any
   feature's behaviour.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, as delivered through Next.js ([0013](./0013-nextjs-web-framework.md)).** Pages
+under `apps/web/src/app` are thin server wrappers (an authentication guard in the layout) around
+client components that load once and update over tRPC and the WebSocket stream.

@@ -56,3 +56,13 @@ Vite.
   interactive pages are client components rather than server components.
 - Keeps [Decision 0010](./0010-spa-interactive-application.md) (SPA) and
   [Decision 0011](./0011-frontend-backend-protocol.md) (protocols).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** Next.js App Router in `apps/web` serves tRPC, the OpenAPI file and the MCP
+endpoint through Route Handlers; the WebSocket and harness supervision live in the separate
+orchestrator service. Development cannot use Turbopack because of the `.js` to `.ts` import
+extension mapping, and cold compiles are slow; neither is a reason to revisit the decision.

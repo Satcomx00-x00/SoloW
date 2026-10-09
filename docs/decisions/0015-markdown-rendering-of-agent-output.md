@@ -61,3 +61,11 @@ stay verbatim.
   markdown when the turn closes. `buildTranscript` is what marks that boundary.
 - The XSS guarantees are load-bearing and therefore tested, not assumed: `markdown.test.tsx`
   asserts that raw HTML renders as text and that a `javascript:` link is not an anchor.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** `react-markdown` with `remark-gfm` (and `rehype-highlight` for code) renders
+harness prose; `rehype-raw` is not a dependency of `apps/web`.

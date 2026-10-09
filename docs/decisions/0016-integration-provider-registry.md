@@ -146,3 +146,13 @@ deliberately excluded — see *Out of scope*.
 - [F21 — Integration Providers](../features/F21-integration-providers.md)
 - `packages/core/src/registry.ts` — the contribution registry this reuses
 - `packages/scm/src/types.ts` — the `ChangeProvider` interface being split
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, and was proven by its third provider.** `packages/scm/src/index.ts` registers
+GitHub, GitLab and Gitea as descriptors with declared capabilities; Gitea declares fewer
+(issues, issue writes, repositories, change requests) and the rest of the product rendered the
+difference without special cases. Jira stayed out, as the 2026-08-19 scope decision said.

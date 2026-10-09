@@ -118,3 +118,24 @@ public HTTP contract is the tRPC surface the browser talks to (Decision 0011).
   union, not as a patch string a client composes.
 - **Anything that writes to a remote.** Push, publish and pull belong to issue #71's integration
   strategies, behind the review gate. This route reads and stages; it does not ship.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: does not hold as built — the route was never wired.**
+
+- The orchestrator serves no worktree git route: its HTTP routes are `/health`, `/events`,
+  `/api/inngest`, `/announce`, `/probe-agent`, `/executor-availability`, `/explain` and the
+  `/terminal` socket (`apps/orchestrator/src/index.ts`). The git operations this record
+  describes exist in `apps/orchestrator/src/worktree/scm-ops.ts` (`stagePaths`, `unstagePaths`,
+  `discardPaths`) and nothing calls them.
+- The source-control panel is read-only: it is built from the diff captured at the end of the
+  harness's turn (`captured-scm.ts`), and its stage, unstage and discard callbacks are no-ops
+  (`changes-panel.tsx`). Approval commits every change in the worktree (`commitWorktree`:
+  `git add -A`, minus copied setup files), not a staged selection.
+- The signed-ticket pattern this record relied on is in use for the terminal socket and the
+  harness probe, so the design is still the right one if the panel is made interactive. Until
+  then [F22](../features/F22-source-control.md) FR-6 and FR-7 are not met. Whether to wire it
+  or withdraw this decision is open; it is not on the 1.0 roadmap.

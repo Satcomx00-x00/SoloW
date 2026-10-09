@@ -215,3 +215,18 @@ turned a clean "no runner for this protocol" refusal into a `TypeError` deep ins
 The existing test for that refusal is what caught it. Lookups now go through
 `harnessProtocolDescriptor`, which answers an undriven descriptor for anything unrecognised, and the
 switch has a `default` for the same reason.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, as the boundary for every harness except Claude Code.**
+
+- `packages/acp` is a full ACP client over stdio and drives opencode with nothing but a catalog
+  row (`DEFAULT_HARNESS_CATALOG`), which is the outcome this decision was for.
+- Claude Code still runs on its own stream-JSON protocol, and a third, plain-CLI protocol exists
+  for harnesses that speak neither (`HARNESS_PROTOCOLS` in `packages/contracts`). "All harnesses
+  through ACP" is therefore not literally true, as this record's own status sections say.
+- The expected breadth has not followed: two harnesses come ready to use, not the many the
+  context anticipated ([F04](../features/F04-harness-orchestration.md)).

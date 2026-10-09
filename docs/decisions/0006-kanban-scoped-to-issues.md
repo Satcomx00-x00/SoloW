@@ -34,3 +34,13 @@ span many Issues (with Issues shown as groupings). Every Task belongs to exactly
 - Realises [F01](../features/F01-issue-management.md),
   [F02](../features/F02-kanban-task-administration.md), and the
   [domain model](../product/04-domain-model.md).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** Every Task belongs to exactly one Issue (`task.issue_id` is non-null), and
+the board administers Tasks across a Project's Issues. The friction this caused for a project
+with no external tracker (finding A2) was resolved without changing the decision: Issues can be
+created locally, and a quick task creates the Issue and the Task together.
