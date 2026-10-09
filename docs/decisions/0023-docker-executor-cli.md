@@ -180,6 +180,19 @@ reaper enumerates the two separately: a one-shot has no Task row to read, so it 
 hour's ceiling on its age (a removal this process failed to make). See F07, "Launches that are not
 a Task's run".
 
+The same addition gave it a third: **`solow.role=terminal`**, the Task page's terminal for a Docker
+Task (2026-10-10). Until then the terminal opened on the orchestrator's host whatever the profile
+said — the worktree is bind-mounted at its own path, so the host had a directory to open it in —
+and since the terminal mounts the Task's conversation, a Task that asked for a container had its
+harness TUI run on the host with the Task's credential. A terminal container is named for the
+*connection* (`solow-terminal-<sha256(deployment:terminal:connection)[0..12]>`), carries the run's
+image, limits, user and mounts (`taskExecutorPlacement`, the function the run itself uses), passes
+the run's preflight, and is removed when the window closes; nothing falls back to the host. The
+reaper judges it by neither rule a one-shot has: an open terminal has no lifetime an age could
+bound, and the claim cannot tell "this process still holds it" from "this process failed to remove
+it". The evidence is the set of terminals this process holds a socket for (`isOpenTerminal`), which
+a predecessor's containers and a failed removal are both missing from.
+
 ### The environment travels on the exec's own stdin
 
 Not in argv, not in a file, and not anywhere `docker inspect` can read it. The variables arrive as
@@ -211,6 +224,20 @@ TTY merges stdout and stderr and both runners depend on the split. And `base64` 
 utilities list the preflight probes, so a distroless or scratch image fails legibly instead of
 producing a harness with an empty environment and no explanation; distroless images are, explicitly,
 unsupported.
+
+> **Amended 2026-10-10 (roadmap B4, the terminal).** One exec now passes `-t`: the terminal's,
+> which is a person's TTY and never a harness runner's pipe. Its environment cannot ride on stdin —
+> a TTY echoes the line back to the browser, credential and all, and cuts a canonical line at
+> 4 KiB — so it takes the one other channel that keeps values out of the host's argv: `docker exec
+> -e NAME` with no `=`, which makes the CLI read `NAME` from its *own* environment. The names carry a
+> prefix (`SOLOW_ENV_`) so a Task's `DOCKER_HOST` or `PATH` cannot steer the CLI, and a shim of
+> `env -i 'NAME'="$SOLOW_ENV_NAME" …` keeps the replace semantics, which is the half of the `-e`
+> objection above this answers; the names are spliced only after passing the same name check.
+> Verified live: the program sees exactly the caller's variables (not the exec's own `TERM`,
+> `HOSTNAME` or `HOME`), no value appears in host `ps`, and the exit code comes through. The
+> detach keys are moved off ctrl-p,ctrl-q, because the CLI holds back each byte that could start
+> the sequence until the next arrives — every ctrl-p sat in the CLI — and the proxy cannot be
+> turned off, only pointed at keys nobody types.
 
 For `exec` — as opposed to `spawn` — "the executor's own environment" means **the container's,
 never `process.env`**. Copying the host's environment in would leak host credentials into the
