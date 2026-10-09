@@ -663,8 +663,9 @@ function Choice({
  *
  * Retry for everything except an expired credential, which the board also refuses to retry:
  * trying again before the credential itself changes would only fail the same way again
- * immediately, so that one gets Renew instead (spec AC-013, issue #63). A parked Task resumes by
- * itself when the quota window resets; Retry there is "don't wait".
+ * immediately, so that one gets Renew instead (spec AC-013, issue #63). A parked Task tries again
+ * by itself after a fixed five-hour wait — no reset time is read from the provider (D3); Retry
+ * there is "don't wait".
  */
 function FailedOrParked({
   task,
@@ -682,7 +683,7 @@ function FailedOrParked({
   const detail =
     reason?.detail ??
     (parked
-      ? "The run resumes by itself when the quota window resets. Retry to start it now instead."
+      ? "The run hit a usage limit and tries again by itself five hours after it stopped. Retry to start it now instead."
       : "Retry starts a fresh run from the task brief.");
   const renew = task.failureReason === CREDENTIAL_EXPIRED_REASON;
   // An approval that committed and did not ship: the work is approved, so Retry — a harness round

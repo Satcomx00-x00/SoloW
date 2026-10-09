@@ -57,8 +57,8 @@ export const STATE_LABELS: Record<TaskState, string> = {
  * How each lifecycle state looks (task TASK-021 / F02).
  *
  * State is the one thing a reader opens this tool to learn, and the seven states are not equally
- * urgent: `review` is the only one waiting on a human (Principle I), `parked` resumes by itself
- * when the quota window resets, `failed` will not. Mapping them onto shadcn's four generic badge
+ * urgent: `review` is the only one waiting on a human (Principle I), `parked` tries again by
+ * itself after a fixed wait, `failed` will not. Mapping them onto shadcn's four generic badge
  * variants collapsed three pairs into identical pills — Running read exactly like Review, Ready
  * like Done, Backlog like Parked — so the board said "seven columns" while the badges said
  * "four kinds of thing".

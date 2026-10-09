@@ -124,9 +124,11 @@ export function groupChanges(
  * makes the *scope* of the click obvious at a glance — "2 repositories, 2 branches, 14 files" —
  * for the reviewer who is about to approve without scrolling.
  *
- * There is deliberately no "1 pull request" clause. Opening one is issue #71's integration
- * strategy and this build does not do it, so promising it here would state a consequence that
- * will not happen — the exact failure this summary exists to prevent, pointed the other way.
+ * There is deliberately no "1 pull request" clause. Approval does deliver the branch and open or
+ * update a pull request (apps/orchestrator/src/delivery.ts), but only for a repository connected
+ * to a provider with a remote — and this summary cannot know that the push will succeed. Promising
+ * it would state a consequence that may not happen, the exact failure this summary exists to
+ * prevent; the delivery status says what actually happened, after the fact.
  */
 export function summariseConsequences(groups: readonly ReviewGroup[]): string {
   if (groups.length === 0) return "Nothing to commit — the harness proposed no changes.";

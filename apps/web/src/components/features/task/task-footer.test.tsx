@@ -131,7 +131,7 @@ describe("TaskFooter", () => {
     expect(calls).toEqual(["ship-again", "keep-local"]);
   });
 
-  it("lets a parked task be resumed now rather than when the window resets", () => {
+  it("lets a parked task be resumed now rather than after the fixed wait", () => {
     const calls = renderFooter({ state: "parked", failureReason: "park" });
     expect(screen.getByText("Paused on quota")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));

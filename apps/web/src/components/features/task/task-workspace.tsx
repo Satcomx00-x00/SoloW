@@ -287,7 +287,7 @@ const STATE_SENTENCE: Record<TaskState, string> = {
   review: "At the gate — your decision is what moves it.",
   done: "Finished.",
   failed: "The last run failed.",
-  parked: "Paused on quota until the window resets.",
+  parked: "Paused on a usage limit. It tries again by itself five hours after it stopped.",
 };
 
 /**

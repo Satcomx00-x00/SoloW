@@ -133,7 +133,7 @@ it is how an operator gets from one shape to the next.
   the gates are a person's to open. The two library *lists* are exposed so a Step can name items
   by id; library writes stay signed-in.
 - **A node is a form only when you are close enough to fill one.** Below 0.72 zoom every Step
-  card collapses to what a pipeline is *read* for — ordinal, name, harness, gate and advance rule,
+  card collapses to what a pipeline is *read* for — ordinal, name, harness, the gate's plain name,
   a branch mark, a problem count — and the fields come back on the way in (React Flow's contextual
   zoom). Six nodes each drawing three selects, a prompt, two library pickers and a branch form was
   a wall of controls with the pipeline somewhere behind it, at a zoom where none of them could be
@@ -300,8 +300,11 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
 - **Every Step names a Harness Profile** from the catalog of [F05](./F05-harness-executor-profiles.md)
   (issue #10). There is no second way of naming a harness, which is what makes "a single Task uses
   different harnesses across Steps" a difference between two rows.
-- **Gates.** A Step's gate is `human`, `auto`, or `auto-unless-changes`; its advance rule is
-  `agent-signal` or `review`. A gate decides whether an *intermediate* Step waits for a person.
+- **Gates.** A Step's gate is `human`, `agent-decides`, `auto`, or `auto-unless-changes` — shown
+  as Wait for review, Harness decides, Move on, and Move on unless files changed
+  (`apps/web/src/lib/workflow-gates.ts`); its advance rule is `agent-signal` or `review`, shown
+  as "Finished when": Harness says done / You approve it. A Step that finishes on a review waits
+  for one whatever its gate says, so the designer keeps the two in step. A gate decides whether an *intermediate* Step waits for a person.
 - **The human decision before integration is unconditional, and it is an approval.** The last Step
   of a Workflow reports `completed` only once an `approve` review is recorded for the Task,
   whatever every Step's gate says; the gate value is not consulted on that branch at all
@@ -468,9 +471,9 @@ and the per-Step review linkage it unlocks, copy-on-write versioning so a Run re
 the definition it started on, non-harness Step kinds (Gate, Fork/Join — FR-2; Condition ships as a Step property, above), validity
 checking (FR-5), import/export (FR-7), and per-Step run history.
 
-The /workflows UI keeps its WIP badge (`Section.wip` in `apps/web/src/lib/navigation.ts`) while the
-Monitor and per-Step history are outstanding, so a user finds a clearly-marked in-progress surface
-rather than one that looks broken.
+The /workflows UI carried a WIP badge until 2026-10-09. It was removed when Workflows became part
+of the supported main line ([0031](../decisions/0031-focus-on-the-solo-power-user.md)); what is
+still outstanding is listed above rather than flagged in the interface.
 
 ## Related
 

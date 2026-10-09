@@ -342,8 +342,8 @@ export function HarnessProfilesSection() {
           /*
             The reading this whole section exists to give, and which it never gave before: a
             concurrency cap is only meaningful against the slots currently spending it. Parked
-            outranks running in the tone, because Parked is the state a cap *causes* — it means
-            work is waiting on a ceiling set right here.
+            outranks running in the tone, because a parked run is work standing still: it hit a
+            usage limit and waits out a fixed five hours before it claims a slot again.
           */
           <SectionStatus tone={parked > 0 ? "waiting" : running > 0 ? "active" : "idle"}>
             {rows.length === 0
