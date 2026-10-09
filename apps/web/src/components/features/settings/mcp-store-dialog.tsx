@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -294,7 +295,7 @@ function StoreCard({
         <p className="text-feedback-error text-xs" role="alert">
           {create.error.message === HarnessLibraryErrorCode.NameTaken
             ? `A server named ${entry.name} is already in the library.`
-            : create.error.message}
+            : describeError(create.error)}
         </p>
       )}
 

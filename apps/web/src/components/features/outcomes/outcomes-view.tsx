@@ -11,6 +11,7 @@ import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { Button } from "@/components/ui/button";
+import { describeError } from "@/lib/errors";
 import { STATE_LABELS } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -39,8 +40,8 @@ export function OutcomesView() {
             <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
             <div role="alert">
               <p className="font-medium">Failed to load outcomes</p>
-              <p className="mt-0.5 font-mono text-muted-foreground text-xs">
-                {outcomes.error.message}
+              <p className="mt-0.5 text-muted-foreground text-xs">
+                {describeError(outcomes.error)}
               </p>
             </div>
           </div>

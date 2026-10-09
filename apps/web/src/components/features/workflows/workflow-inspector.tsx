@@ -11,8 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
-import { taskActionMessage } from "@/lib/task-errors";
 import { nextStepName, stepDotColors } from "@/lib/workflow-canvas";
 import { trpc } from "@/trpc/react";
 
@@ -135,8 +135,8 @@ function Outline({ workflow }: { workflow: WorkflowWithStepsDto }) {
         </p>
       )}
       {add.error && (
-        <p className="px-2 font-mono text-2xs text-state-failed" role="alert">
-          {add.error.message}
+        <p className="px-2 text-2xs text-state-failed" role="alert">
+          {describeError(add.error)}
         </p>
       )}
     </div>
@@ -241,7 +241,7 @@ function Properties({ workflow }: { workflow: WorkflowWithStepsDto }) {
       />
       {(rename.error || remove.error) && (
         <p className="font-mono text-2xs text-state-failed" role="alert">
-          {taskActionMessage((rename.error ?? remove.error)?.message)}
+          {describeError(rename.error ?? remove.error)}
         </p>
       )}
     </div>

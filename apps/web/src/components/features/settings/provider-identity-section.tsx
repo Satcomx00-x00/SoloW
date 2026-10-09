@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import {
   SectionStatus,
@@ -175,12 +176,12 @@ export function ProviderIdentitySection() {
       )}
       {save.error && (
         <p className="text-destructive text-sm" role="alert">
-          {save.error.message}
+          {describeError(save.error)}
         </p>
       )}
       {clear.error && (
         <p className="text-destructive text-sm" role="alert">
-          {clear.error.message}
+          {describeError(clear.error)}
         </p>
       )}
     </SettingsSection>

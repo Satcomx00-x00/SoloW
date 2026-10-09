@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { describeError } from "@/lib/errors";
 
 /**
  * The chrome the two library sections share (spec F24), so an MCP server and a Skill read as
@@ -33,7 +34,7 @@ export function LibraryQueryState({ error }: { error: { message: string } | null
   return (
     <div className="flex items-start gap-2 text-sm" role="alert">
       <TriangleAlert className="mt-px size-4 shrink-0 text-feedback-error" aria-hidden />
-      <p className="font-mono text-muted-foreground text-xs">{error.message}</p>
+      <p className="text-muted-foreground text-xs">{describeError(error)}</p>
     </div>
   );
 }

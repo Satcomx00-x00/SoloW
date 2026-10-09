@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -373,7 +374,7 @@ export function ImportSkillsDialog({
           )}
           {doImport.error && (
             <p className="text-destructive text-sm" role="alert">
-              {doImport.error.message}
+              {describeError(doImport.error)}
             </p>
           )}
         </DialogBody>
@@ -424,5 +425,5 @@ function describeScanError(code: string, kind: Source): string {
   if (code === HarnessLibraryErrorCode.ImportLocatorInvalid) {
     return "That is not something a skills installer would take: try owner/repo, a repository URL, a directory, or the npx skills add … line as the README prints it.";
   }
-  return code;
+  return describeError(code);
 }

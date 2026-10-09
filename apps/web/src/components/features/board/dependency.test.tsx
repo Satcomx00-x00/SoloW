@@ -274,7 +274,9 @@ describe("Board dependencies", () => {
       },
     );
 
-    expect((await screen.findByRole("alert")).textContent).toContain("edges unavailable");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Try again");
+    expect(alert.textContent).not.toContain("edges unavailable");
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(screen.queryByText("Wire the latch")).toBeNull();
   });

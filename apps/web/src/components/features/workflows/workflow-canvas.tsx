@@ -94,6 +94,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import {
   branchRetarget,
@@ -1420,8 +1421,8 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
               save={(branch) => update.mutate({ stepId: step.id, branch })}
             />
             {(update.error || remove.error) && (
-              <p className="font-mono text-state-failed text-xs" role="alert">
-                {(update.error ?? remove.error)?.message}
+              <p className="text-state-failed text-xs" role="alert">
+                {describeError(update.error ?? remove.error)}
               </p>
             )}
           </div>
@@ -1989,8 +1990,8 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
         )}
         {error && (
           <Panel position="bottom-center">
-            <p className="font-mono text-state-failed text-xs" role="alert">
-              {error.message}
+            <p className="text-state-failed text-xs" role="alert">
+              {describeError(error)}
             </p>
           </Panel>
         )}

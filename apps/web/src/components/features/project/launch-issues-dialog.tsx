@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -143,7 +144,7 @@ export function LaunchIssuesDialog({
           ...o,
           [row.item.id]: {
             status: "error",
-            message: error instanceof Error ? error.message : "Failed to launch",
+            message: describeError(error),
           },
         }));
       }

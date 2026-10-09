@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { ConfirmAction, ConfirmDialog } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -105,7 +106,7 @@ function messageFor(code: string | undefined): string {
     case IssueErrorCode.StopFailed:
       return "The running tasks could not be stopped, so nothing was deleted. Check the orchestrator is up, then try again.";
     default:
-      return code ?? "Delete failed.";
+      return describeError(code);
   }
 }
 

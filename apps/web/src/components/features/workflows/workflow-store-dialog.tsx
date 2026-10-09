@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
@@ -262,7 +263,7 @@ function StoreCard({
 
       {install.error && (
         <p className="text-feedback-error text-xs" role="alert">
-          {install.error.message}
+          {describeError(install.error)}
         </p>
       )}
 

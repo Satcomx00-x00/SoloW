@@ -68,7 +68,7 @@ describe("WorkflowCreateActions", () => {
   it("says why when the server refuses the name", async () => {
     renderWithTrpc(<WorkflowCreateActions installed={[]} />, {
       "workflow.create": () => {
-        throw new Error("A workflow with that name already exists");
+        throw new Error("VALIDATION_FAILED");
       },
     });
 
@@ -78,7 +78,9 @@ describe("WorkflowCreateActions", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("already exists");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Check the fields");
+    expect(alert.textContent).not.toContain("VALIDATION_FAILED");
     expect(pushed).toEqual([]);
   });
 });

@@ -157,7 +157,9 @@ describe("ExportWorkflowButton", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Export as JSON" }));
 
-      expect((await screen.findByRole("alert")).textContent).toContain("WORKFLOW_EMPTY");
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("This workflow has no steps yet");
+      expect(alert.textContent).not.toContain("WORKFLOW_EMPTY");
       expect(download.saved).toHaveLength(0);
     } finally {
       download.restore();

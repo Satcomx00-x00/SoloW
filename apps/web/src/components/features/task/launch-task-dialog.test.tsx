@@ -175,7 +175,7 @@ describe("LaunchTaskDialog", () => {
       </Live>,
       handlers(task, {
         "workflow.attachTask": () => {
-          throw new Error("WORKFLOW_TASK_NOT_ATTACHABLE");
+          throw new Error("WORKFLOW_TASK_ALREADY_STARTED");
         },
       }),
     );
@@ -183,9 +183,10 @@ describe("LaunchTaskDialog", () => {
     await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("radio", { name: /Implement & review/ }));
     fireEvent.click(screen.getAllByRole("button", { name: "Launch" }).at(-1)!);
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "WORKFLOW_TASK_NOT_ATTACHABLE",
-    );
+    // The refusal in words, never the wire code (finding E6).
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("its workflow can't change now");
+    expect(alert.textContent).not.toContain("WORKFLOW_TASK_ALREADY_STARTED");
     expect(log.calls.filter((c) => c.path === "task.launch")).toHaveLength(0);
     expect(screen.getByRole("dialog")).toBeTruthy();
   });

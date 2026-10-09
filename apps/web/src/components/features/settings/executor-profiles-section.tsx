@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { useFlag } from "@/lib/use-flag";
 import { trpc } from "@/trpc/react";
@@ -288,7 +289,7 @@ export function ExecutorProfilesSection() {
 
       {remove.error && (
         <p className="text-destructive text-sm" role="alert">
-          {remove.error.message}
+          {describeError(remove.error)}
         </p>
       )}
 
@@ -532,7 +533,7 @@ export function ExecutorProfilesSection() {
 
         {error && (
           <p className="text-destructive text-sm" role="alert">
-            {error.message}
+            {describeError(error)}
           </p>
         )}
       </SettingsCreate>

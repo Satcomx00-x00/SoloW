@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -514,7 +515,7 @@ export function HarnessProfilesSection() {
       )}
       {deleteProfile.error && (
         <p className="text-destructive text-sm" role="alert">
-          {deleteProfile.error.message}
+          {describeError(deleteProfile.error)}
         </p>
       )}
 
@@ -786,7 +787,7 @@ export function HarnessProfilesSection() {
         </form>
         {create.error && (
           <p className="text-destructive text-sm" role="alert">
-            {create.error.message}
+            {describeError(create.error)}
           </p>
         )}
 
@@ -946,7 +947,7 @@ export function HarnessProfilesSection() {
             </form>
             {createCatalogEntry.error && (
               <p className="text-destructive text-sm" role="alert">
-                {createCatalogEntry.error.message}
+                {describeError(createCatalogEntry.error)}
               </p>
             )}
           </div>

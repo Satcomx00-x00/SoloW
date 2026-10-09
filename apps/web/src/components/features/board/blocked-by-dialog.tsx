@@ -12,6 +12,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { describeError } from "@/lib/errors";
 import { STATE_LABELS } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -58,7 +59,7 @@ export function BlockedByDialog({
         onCycle(path);
         return;
       }
-      setFailure(error.message);
+      setFailure(describeError(error));
     },
   });
   const remove = trpc.task.removeDependency.useMutation({ onSuccess: settled });

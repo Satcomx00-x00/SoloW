@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import {
@@ -191,7 +192,7 @@ export function IntegrationsSection() {
       )}
       {disconnect.error && (
         <p className="text-destructive text-sm" role="alert">
-          {disconnect.error.message}
+          {describeError(disconnect.error)}
         </p>
       )}
 
@@ -276,7 +277,7 @@ export function IntegrationsSection() {
           </p>
           {externalRepos.error && (
             <p className="text-destructive text-sm" role="alert">
-              Could not list repositories: {externalRepos.error.message}
+              Could not list repositories. {describeError(externalRepos.error)}
             </p>
           )}
           {externalRepos.isSuccess && externalRepos.data.length === 0 && (
@@ -286,7 +287,7 @@ export function IntegrationsSection() {
           )}
           {importRepository.error && (
             <p className="text-destructive text-sm" role="alert">
-              {importRepository.error.message}
+              {describeError(importRepository.error)}
             </p>
           )}
         </div>
@@ -317,7 +318,7 @@ export function IntegrationsSection() {
           </ul>
           {sync.error && (
             <p className="text-destructive text-sm" role="alert">
-              {sync.error.message}
+              {describeError(sync.error)}
             </p>
           )}
         </div>
@@ -408,7 +409,7 @@ export function IntegrationsSection() {
         </form>
         {connect.error && (
           <p className="text-destructive text-sm" role="alert">
-            {connect.error.message}
+            {describeError(connect.error)}
           </p>
         )}
       </SettingsCreate>

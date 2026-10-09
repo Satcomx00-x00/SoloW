@@ -1271,9 +1271,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         <p className="text-muted-foreground text-sm">
           It may have been deleted, or the link may be stale.
         </p>
+        {/* Not a fixed `/board`: no such route exists any more (boards live under a Project),
+            so that link led to a 404. With no Task loaded there is no Project to name, and
+            `back` resolves to the Projects list. */}
         <Button asChild variant="outline" size="sm">
-          <Link href="/board">
-            <ArrowLeft /> Back to the board
+          <Link href={back.href}>
+            <ArrowLeft /> {back.label}
           </Link>
         </Button>
       </div>

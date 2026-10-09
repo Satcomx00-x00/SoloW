@@ -268,7 +268,7 @@ test.describe("@critical isolation", () => {
     // app has for a Task that is not there, never as the wire code. (Filtered because Next.js
     // keeps its own empty `role="alert"` route announcer in the page.)
     await expect(page.getByRole("alert").filter({ hasText: /no longer exists/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back to the board" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to projects" })).toBeVisible();
     await expect(page.getByText(OTHER_WORKSPACE_TASK_TITLE)).toHaveCount(0);
   });
 

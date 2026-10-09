@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -334,7 +335,7 @@ export function ImportIssuesDialog({
 
             {importIssues.error && (
               <p className="shrink-0 text-destructive text-sm" role="alert">
-                {importIssues.error.message}
+                {describeError(importIssues.error)}
               </p>
             )}
 

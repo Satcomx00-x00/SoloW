@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { groupLabelsByCategory, MarkdownField } from "./issue-authoring";
 import { IssueComments } from "./issue-comments";
@@ -294,7 +295,7 @@ export function IssuePanel({
               <Skeleton className="h-5 w-1/2" />
             </div>
           ) : detail.error ? (
-            <p className="p-4 text-2xs text-state-failed">{detail.error.message}</p>
+            <p className="p-4 text-2xs text-state-failed">{describeError(detail.error)}</p>
           ) : data ? (
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[1fr_300px]">
               {/* The issue on the left, its parameters on the right — GitHub's own arrangement.
@@ -606,7 +607,7 @@ export function IssuePanel({
                 {update.error && (
                   // The provider's own refusal, verbatim: "assignee has no access" and "the save is
                   // broken" call for different actions, and only one of them is true.
-                  <p className="text-2xs text-state-failed">{update.error.message}</p>
+                  <p className="text-2xs text-state-failed">{describeError(update.error)}</p>
                 )}
 
                 {/*

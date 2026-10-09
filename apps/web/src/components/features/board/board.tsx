@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { type BoardColumn, lifecycleColumns, workflowColumns } from "@/lib/board-columns";
+import { describeError } from "@/lib/errors";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
@@ -359,7 +360,7 @@ export function Board({
         <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
         <div>
           <p className="font-medium">Failed to load the board</p>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{loadError.message}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{describeError(loadError)}</p>
         </div>
       </div>
     );

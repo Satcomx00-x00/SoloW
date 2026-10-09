@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { SectionStatus, SettingsField, SettingsLoading, SettingsSection } from "./settings-shell";
 
@@ -90,7 +91,7 @@ export function WorkspaceSection() {
           </form>
           {rename.error && (
             <p className="text-destructive text-sm" role="alert">
-              {rename.error.message}
+              {describeError(rename.error)}
             </p>
           )}
 

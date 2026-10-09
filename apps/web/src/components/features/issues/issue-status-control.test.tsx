@@ -174,6 +174,9 @@ describe("IssueStatusControl", () => {
     openStatusMenu("In progress");
     await choose("Resolved");
 
-    expect((await screen.findByRole("alert")).textContent).toContain("database is locked");
+    // Surfaced as a sentence with a next step — never the driver's own text.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Try again");
+    expect(alert.textContent).not.toContain("database is locked");
   });
 });

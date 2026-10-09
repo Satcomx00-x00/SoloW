@@ -506,6 +506,34 @@ describe("WorkflowsView", () => {
     expect(screen.queryByRole("list", { name: "Workflows" })).toBeNull();
   });
 
+  it("says a workflow named in the URL is gone, instead of drawing a different one", async () => {
+    renderWithTrpc(<WorkflowsView workflowId="wf-deleted" />, handlersFor());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This workflow no longer exists");
+    expect(screen.getByRole("link", { name: "All workflows" }).getAttribute("href")).toBe(
+      "/workflows",
+    );
+    // The first pipeline in the list must not stand in for the missing one.
+    expect(screen.queryByLabelText(/^Name of step \d+$/)).toBeNull();
+  });
+
+  it("replaces 'Loading steps…' with a sentence when the workflow cannot be read", async () => {
+    renderWithTrpc(
+      <WorkflowsView workflowId="wf-1" />,
+      handlersFor({
+        "workflow.get": () => {
+          throw new Error("NOT_FOUND");
+        },
+      }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This workflow no longer exists");
+    expect(alert.textContent).not.toContain("NOT_FOUND");
+    expect(screen.queryByText("Loading steps…")).toBeNull();
+  });
+
   it("names the harness profile each step runs under, from the profile catalog", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 

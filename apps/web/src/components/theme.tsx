@@ -2,6 +2,7 @@
 
 import { type Theme, themeSchema } from "@solow/contracts";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { describeOptionalError } from "@/lib/errors";
 import { THEME_STORAGE_KEY } from "@/lib/theme-boot";
 import { trpc } from "@/trpc/react";
 
@@ -58,6 +59,15 @@ function cachedTheme(): Theme {
     // Unreadable storage is not an error worth surfacing: the default is a correct answer.
   }
   return "dark";
+}
+
+/**
+ * Re-apply the cached theme without the store — for `app/global-error.tsx`, which replaces the
+ * root layout and so renders its own `<html>`: React writes that element's `className` and drops
+ * the class the boot script put there, and nothing else is mounted to put it back.
+ */
+export function applyCachedTheme(): void {
+  applyTheme(cachedTheme());
 }
 
 /*
@@ -208,7 +218,7 @@ export function useTheme(): {
     theme,
     setTheme,
     saving: save.isPending,
-    error: save.error ? save.error.message : null,
+    error: describeOptionalError(save.error),
   };
 }
 

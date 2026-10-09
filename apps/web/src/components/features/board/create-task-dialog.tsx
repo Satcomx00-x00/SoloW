@@ -37,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, issueSourceLabel } from "@/lib/issue-status";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
@@ -586,7 +587,7 @@ export function CreateTaskDialog({
 
                 {create.error && (
                   <p className="text-destructive text-sm" role="alert">
-                    {create.error.message}
+                    {describeError(create.error)}
                   </p>
                 )}
               </DialogBody>

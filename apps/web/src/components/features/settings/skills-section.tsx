@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { type ImportReport, ImportSkillsDialog } from "./import-skills-dialog";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
@@ -186,8 +187,8 @@ export function SkillsSection() {
           />
         )}
         {(update.error || remove.error) && (
-          <p className="font-mono text-feedback-error text-xs" role="alert">
-            {(update.error ?? remove.error)?.message}
+          <p className="text-feedback-error text-xs" role="alert">
+            {describeError(update.error ?? remove.error)}
           </p>
         )}
 
@@ -283,8 +284,8 @@ export function SkillsSection() {
               </Button>
             </div>
             {create.error && (
-              <p className="font-mono text-feedback-error text-xs" role="alert">
-                {create.error.message}
+              <p className="text-feedback-error text-xs" role="alert">
+                {describeError(create.error)}
               </p>
             )}
           </LibraryForm>

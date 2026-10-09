@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { SectionStatus, SettingsEmpty, SettingsLoading, SettingsSection } from "./settings-shell";
 
@@ -125,7 +126,7 @@ export function FlagsSection() {
       )}
       {set.error && (
         <p className="text-destructive text-sm" role="alert">
-          {set.error.message}
+          {describeError(set.error)}
         </p>
       )}
       <ConfirmDialog

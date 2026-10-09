@@ -4,6 +4,7 @@ import { MAX_SETUP_FILE_PATTERNS, setupFilePatternSchema } from "@solow/contract
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { describeError } from "@/lib/errors";
 import { newRowId } from "@/lib/row-id";
 import { trpc } from "@/trpc/react";
 
@@ -117,7 +118,7 @@ export function SetupFileRows({
       </div>
       {save.error && (
         <p className="text-destructive text-xs" role="alert">
-          {save.error.message}
+          {describeError(save.error)}
         </p>
       )}
     </div>

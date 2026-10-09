@@ -161,7 +161,9 @@ describe("the new-task defaults section", () => {
     });
 
     await pick("Default harness profile", "opencode");
-    expect((await screen.findByRole("alert")).textContent).toContain("database is locked");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("That didn't work");
+    expect(alert.textContent).not.toContain("database is locked");
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
