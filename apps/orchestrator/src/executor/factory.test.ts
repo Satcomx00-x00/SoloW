@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { openOutOfBandExecutor, orchestratorStatePaths } from "./factory.js";
+import { isOpenTerminal } from "./docker.js";
+import { openOutOfBandExecutor, openTerminalExecutor, orchestratorStatePaths } from "./factory.js";
+import type { Executor } from "./types.js";
 
 /**
  * What the container driver is told it may never mount (B5). The guard's own rules are
@@ -67,5 +69,61 @@ describe("openOutOfBandExecutor", () => {
         { ...launch, purpose: "explain", ...roots },
       ),
     ).rejects.toThrow(/no executor driver for kind "ssh"/);
+  });
+});
+
+/**
+ * Where the Task page's terminal opens (roadmap B4): on this host only for a local Task, in a
+ * container of its own for a Docker one, and nowhere for a kind with no driver. The socket half —
+ * the preflight, the refusals, the launch in the container — is driven in `ws/terminal.test.ts`.
+ */
+describe("openTerminalExecutor", () => {
+  const terminal = {
+    workspaceId: "ws-1",
+    taskId: "task-1",
+    cwd: "/srv/wt/task-1",
+    placement: {
+      jailRoot: "/srv/wt/task-1",
+      worktreeRoot: "/srv/wt",
+      repoCacheRoot: "/srv/repos",
+      bindPaths: ["/srv/wt/task-1", "/srv/repos/tasks/task-1"],
+    },
+    harnessCommands: ["claude"],
+  };
+
+  it("opens a local Task's terminal on this host, with nothing to make or remove", async () => {
+    const opened = openTerminalExecutor({ config: { kind: "local", env: {} } }, terminal);
+
+    expect(await opened.preflight()).toEqual({ ok: true, harnessCommands: [] });
+    await expect(opened.dispose()).resolves.toBeUndefined();
+  });
+
+  it("gives a Docker Task's terminal a container of its own, held until it is disposed of", async () => {
+    // `dockerOpts` reads the deployment's settings, which refuse to parse without this.
+    process.env["SOLOW_STREAM_SECRET"] ??= "factory-terminal";
+    const removed: string[] = [];
+    const host = {
+      exec: async (cmd: string[]) => {
+        if (cmd[1] === "rm") removed.push(cmd[3] as string);
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    } as unknown as Executor;
+
+    const opened = openTerminalExecutor(
+      { config: { kind: "docker", image: "solow-executor:local", mounts: [], env: {} } },
+      { ...terminal, host },
+    );
+    await opened.dispose();
+
+    const [name] = removed;
+    // Named for the connection, so it is neither the Task's container nor another window's.
+    expect(name).toMatch(/^solow-terminal-[0-9a-f]{12}$/);
+    expect(isOpenTerminal(name as string)).toBe(false);
+  });
+
+  it("refuses a kind with no driver rather than falling back to this host", () => {
+    expect(() => openTerminalExecutor({ config: { kind: "ssh" } as never }, terminal)).toThrow(
+      /no executor driver for kind "ssh"/,
+    );
   });
 });

@@ -88,4 +88,30 @@ describe("local executor terminal", () => {
     expect(output).toContain("33 101");
     expect(exitCode).toBe(0);
   });
+
+  it("tells the program it was resized, not only the terminal", async () => {
+    let output = "";
+    const executor = createLocalExecutor(process.cwd());
+    // A TUI redraws on `SIGWINCH`, and `docker exec -t` forwards a resize only on its own.
+    const handle = executor.openTerminal?.(
+      ["/bin/sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; while :; do sleep 0.05; done"],
+      {
+        cwd: process.cwd(),
+        env: { PATH: "/usr/bin:/bin" },
+        cols: 80,
+        rows: 24,
+        onData: (data) => {
+          output += new TextDecoder().decode(data);
+        },
+        onExit: () => {},
+      },
+    );
+    for (let i = 0; i < 100 && !output.includes("ready"); i++) await Bun.sleep(20);
+
+    handle?.resize(132, 40);
+    const exited = await Promise.race([handle?.exited, Bun.sleep(3_000).then(() => "timed out")]);
+
+    expect(exited).toBe(0);
+    expect(output).toContain("40 132");
+  });
 });

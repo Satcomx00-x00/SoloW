@@ -224,6 +224,38 @@ own `HOME`.
 - **Settings' "Test" is unchanged.** Probing a Harness Profile on its own names no executor, and
   stays a probe on the orchestrator's host.
 
+### The Task page's terminal (roadmap B4)
+
+The terminal runs where the Task runs. For a Local Executor Profile it is on the orchestrator's
+host, as before. For a Docker one it is a **terminal container** of its own
+(`openTerminalExecutor`): the run's image, limits, user and preflight, and the run's mounts — this
+Task's worktrees, its own clones, its transcript store and its checkpoint store, from
+`taskExecutorPlacement`, the function the run itself uses. The program is started with `docker
+exec -it` inside it.
+
+- **It never falls back to the host.** A container that cannot start, a kind with no driver, or a
+  Task whose Executor Profile cannot be read ends the socket with the reason on the pane. Before
+  this, a Docker Task's terminal opened on the host — the worktree is bind-mounted at its own path,
+  so there was a directory to open it in — and mounted the Task's conversation in the harness's
+  TUI there, holding the Task's credential, outside the container the profile asked for.
+- **It is never the Task's container.** Labelled `solow.role=terminal` and named for the
+  connection, so it is neither adopted by a run that starts while the window is open nor removed by
+  that run's `dispose()`, and two windows on one Task are two containers. It is removed when the
+  window closes, and anything the hang-up left running goes with it.
+- **The conversation mounts from the transcript store.** In a container the TUI resumes the
+  Task's newest conversation from the store the container sees at `$HOME/.claude/projects`, under
+  the container's own `HOME`, and only if the image has the harness; otherwise the pane says why
+  and opens bash (or `sh`) in the container. A conversation kept only in the operator's own
+  `~/.claude` is never resumed for a container Task — that would mean running the TUI on the host.
+- **The sweep removes one no window holds.** The evidence is the set of terminals this process
+  holds a socket for; a predecessor's terminal containers and one whose removal failed are missing
+  from it and are removed after the twenty-second grace. There is no age ceiling: a terminal is
+  legitimately open for hours.
+- **The environment travels by name.** The values are in the `docker` CLI's own environment under
+  a `SOLOW_ENV_` prefix and are read by `-e NAME`, so none is in the host's argv; `env -i` inside
+  replaces the image's environment with exactly the launch's. See
+  [0023](../decisions/0023-docker-executor-cli.md), the 2026-10-10 amendment.
+
 ### The isolation that holds, and where it stops
 
 A container executor gives a Task **its own process namespace, its own image and userland, and

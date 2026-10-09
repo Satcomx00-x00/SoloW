@@ -26,6 +26,8 @@ import {
 } from "../reconcile.js";
 import {
   CONTAINER_OWNER_PATH,
+  type ContainerRole,
+  containerNameFor,
   createDockerExecutor,
   type DockerExecutorConfig,
   type DockerExecutorOpts,
@@ -212,13 +214,15 @@ interface ContainerRow {
    */
   owner?: string | null;
   /** `session` unless stated — the `solow.role` label, which decides which enumeration lists it. */
-  role?: "session" | "oneshot";
+  role?: ContainerRole;
 }
 
 function psLine(row: ContainerRow): string {
   const age = row.ageMs ?? REAP_GRACE_MS * 3;
-  // The one-shot pass asks for two columns, not five (`reapAbandonedOneShots`).
-  if (row.role === "oneshot") return [row.name, dockerTime(new Date(Date.now() - age))].join("\t");
+  // The one-shot and terminal passes ask for two columns, not five (`reapByRole`).
+  if (row.role !== undefined && row.role !== "session") {
+    return [row.name, dockerTime(new Date(Date.now() - age))].join("\t");
+  }
   return [
     row.name,
     row.workspaceId ?? WS,
@@ -390,6 +394,96 @@ describe("one-shot containers", () => {
 
     expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE)).toBe(1);
     expect(host.removed).toEqual(["solow-oneshot-leak"]);
+  });
+});
+
+/**
+ * Terminal containers — the Task page's terminal, run where the Task runs (roadmap B4).
+ *
+ * The one rule is the socket: held while this process has the window open, however long that is,
+ * and removable the moment it does not — whatever the claim says, because the claim cannot tell a
+ * window still open from a removal that failed.
+ */
+describe("terminal containers", () => {
+  /** A terminal this process holds open: constructing its executor is what marks it held. */
+  function heldTerminal(connection: string) {
+    const host = fakeHost([]);
+    const ids = { workspaceId: WS, taskId: "task-1", sessionId: connection };
+    const opts = { jailRoot: "/srv/wt/task-1", worktreeRoot: "/srv/wt", role: "terminal" as const };
+    const executor = createDockerExecutor(host.executor, DRIVER_CONFIG, ids, opts);
+    return { executor, name: containerNameFor(ids, opts) };
+  }
+
+  it("asks for this deployment's terminals in an enumeration of their own", async () => {
+    const db = createTestDb();
+    const host = fakeHost([]);
+
+    await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE);
+
+    // Never the session pass's list, where a terminal labelled with its Task would be judged as
+    // that Task's container and removed while someone types in it.
+    expect(host.calls[2]).toEqual([
+      orchestratorEnv().SOLOW_DOCKER_BIN,
+      "ps",
+      "-a",
+      "--filter",
+      "label=solow.managed=true",
+      "--filter",
+      "label=solow.role=terminal",
+      "--filter",
+      `label=solow.deployment=${expectedDeployment()}`,
+      "--format",
+      "{{.Names}}\t{{.CreatedAt}}",
+    ]);
+  });
+
+  it("leaves an open one alone however old, and removes it once the window has let go", async () => {
+    const db = createTestDb();
+    const open = heldTerminal("conn-open");
+    // Older than any one-shot may live: an afternoon with the window open is ordinary.
+    const row = {
+      name: open.name,
+      taskId: "task-1",
+      runId: "conn-open",
+      role: "terminal" as const,
+      ageMs: ONE_SHOT_MAX_AGE_MS * 5,
+    };
+
+    expect(await reapOrphanedContainers(fakeHost([row]).executor, db, fakeRegistry(), STALE)).toBe(
+      0,
+    );
+
+    await open.executor.dispose();
+    const after = fakeHost([row]);
+    expect(await reapOrphanedContainers(after.executor, db, fakeRegistry(), STALE)).toBe(1);
+    expect(after.removed).toEqual([open.name]);
+  });
+
+  it("removes one a predecessor left, though it carries this process's claim", async () => {
+    const db = createTestDb();
+    // Claimed by this epoch (the default) and still never opened here: what a `dispose()` whose
+    // `docker rm` failed leaves, and what the claim alone would have protected for ever.
+    const host = fakeHost([
+      { name: "solow-terminal-stray", taskId: "task-1", runId: "conn-x", role: "terminal" },
+    ]);
+
+    expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE)).toBe(1);
+    expect(host.removed).toEqual(["solow-terminal-stray"]);
+  });
+
+  it("leaves a young one alone, held or not", async () => {
+    const db = createTestDb();
+    const host = fakeHost([
+      {
+        name: "solow-terminal-new",
+        taskId: "task-1",
+        runId: "conn-y",
+        role: "terminal",
+        ageMs: 1_000,
+      },
+    ]);
+
+    expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), NOW)).toBe(0);
   });
 });
 

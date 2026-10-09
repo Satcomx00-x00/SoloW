@@ -7,6 +7,7 @@ import { describeExecutorContract } from "./contract.js";
 import {
   CONTAINER_HOME,
   containerName,
+  containerNameFor,
   createDockerExecutor,
   type DockerExecutorConfig,
   type DockerExecutorOpts,
@@ -15,6 +16,7 @@ import {
   deploymentId,
   guardMountSource,
   isExecutorUnavailable,
+  isOpenTerminal,
   type ResolveLinks,
 } from "./docker.js";
 import { openOutOfBandExecutor } from "./factory.js";
@@ -105,6 +107,7 @@ if (LIVE) {
   describeExecutorContract("docker", liveHarness);
   describeMountDifferential();
   describeOneShot();
+  describeTerminal();
 } else {
   describe("Executor contract — docker (live)", () => {
     it.skip("needs a Docker daemon: re-run with SOLOW_TEST_DOCKER=1", () => {});
@@ -114,6 +117,166 @@ if (LIVE) {
   });
   describe("One-shot beside a Task — docker (live)", () => {
     it.skip("needs a Docker daemon: re-run with SOLOW_TEST_DOCKER=1", () => {});
+  });
+  describe("Terminal in a container — docker (live)", () => {
+    it.skip("needs a Docker daemon: re-run with SOLOW_TEST_DOCKER=1", () => {});
+  });
+}
+
+/**
+ * The Task page's terminal, inside a container of its own (roadmap B4).
+ *
+ * `docker.test.ts` pins the argv; every claim that argv rests on is about the Docker CLI and a
+ * TTY, and only a daemon can answer them: that `-e NAME` reads the value from the CLI's own
+ * environment and never needs it in argv, that `env -i` then leaves exactly the caller's
+ * variables (and none of the `TERM`/`HOSTNAME`/`HOME` an exec is otherwise given), that the
+ * detach keys hold back nothing anyone types, that a resize reaches the program, that the exit
+ * code comes through, and that `dispose()` takes the container and whatever is in it.
+ */
+function describeTerminal(): void {
+  describe("Terminal in a container — docker (live)", () => {
+    // Past every wait below together, so a case that fails reports its own assertion — and runs
+    // its `finally` — rather than being cut off by the five-second default with its container up.
+    const CASE_MS = 30_000;
+
+    /** One program on the container's TTY, its output gathered as text. */
+    function open(executor: Executor, cmd: string[], env: Record<string, string>) {
+      let output = "";
+      const handle = executor.openTerminal?.(cmd, {
+        cwd: "/",
+        env,
+        cols: 80,
+        rows: 24,
+        onData: (data) => {
+          output += new TextDecoder().decode(data);
+        },
+        onExit: () => {},
+      });
+      if (!handle) throw new Error("the Docker driver opened no terminal");
+      const until = async (text: string) => {
+        for (let i = 0; i < 250 && !output.includes(text); i++) await Bun.sleep(20);
+        return output.includes(text);
+      };
+      return { handle, output: () => output, until };
+    }
+
+    async function terminalContainer() {
+      const host = createLocalExecutor(process.cwd());
+      const worktreeRoot = await mkdtemp(join(tmpdir(), "gc-docker-terminal-"));
+      const root = join(worktreeRoot, "task-terminal");
+      await mkdir(root, { recursive: true });
+      const ids: DockerIds = {
+        workspaceId: "ws-live",
+        taskId: "task-terminal",
+        sessionId: `conn-${randomBytes(4).toString("hex")}`,
+      };
+      const opts: DockerExecutorOpts = {
+        jailRoot: root,
+        worktreeRoot,
+        user: defaultContainerUser(),
+        role: "terminal",
+      };
+      const executor = createDockerExecutor(host, CONFIG, ids, opts);
+      // Made the way the terminal's preflight makes it; the preflight itself wants an image with
+      // the full userland, which `smoke-docker` exercises.
+      expect((await executor.exec(["true"])).exitCode).toBe(0);
+      return {
+        executor,
+        name: containerNameFor(ids, opts),
+        docker: async (...args: string[]) => (await host.exec(["docker", ...args])).stdout.trim(),
+        cleanup: async () => {
+          await executor.dispose();
+          await rm(worktreeRoot, { recursive: true, force: true });
+        },
+      };
+    }
+
+    it(
+      "hands the program exactly its environment, never in the host's argv, and its exit code back",
+      async () => {
+        const box = await terminalContainer();
+        try {
+          const secret = `sk-live-${randomBytes(6).toString("hex")}`;
+          const term = open(box.executor, ["sh", "-c", "env; read line; exit 7"], {
+            PATH: "/usr/bin:/bin",
+            SOLOW_LIVE_SECRET: secret,
+          });
+          expect(await term.until(`SOLOW_LIVE_SECRET=${secret}`)).toBe(true);
+          const ps = Bun.spawnSync(["ps", "-eo", "args"]).stdout.toString();
+          expect(ps).not.toContain(secret);
+
+          term.handle.write("\r");
+          expect(await term.handle.exited).toBe(7);
+          const names = term
+            .output()
+            .split(/\r?\n/)
+            .map((line) => line.split("=")[0])
+            .filter((name) => name && /^[A-Z_]+$/.test(name));
+          // `PWD` and `SHLVL` are the shell's own; nothing of the image's, the exec's or the
+          // prefixed copies the CLI carried in.
+          expect(new Set(names)).toEqual(new Set(["PATH", "SOLOW_LIVE_SECRET", "PWD", "SHLVL"]));
+        } finally {
+          await box.cleanup();
+        }
+      },
+      CASE_MS,
+    );
+
+    it(
+      "passes ctrl-p straight through, and tells the program it was resized",
+      async () => {
+        const box = await terminalContainer();
+        try {
+          const keys = open(
+            box.executor,
+            ["sh", "-c", "stty raw -echo; dd bs=1 count=1 2>/dev/null | od -An -tx1; stty sane"],
+            { PATH: "/usr/bin:/bin" },
+          );
+          await Bun.sleep(500);
+          keys.handle.write(new Uint8Array([0x10]));
+          // Under the default detach keys this byte waits in the CLI for the next one.
+          expect(await keys.until(" 10")).toBe(true);
+          await keys.handle.exited;
+
+          const resized = open(
+            box.executor,
+            ["sh", "-c", "trap 'stty size; exit 0' WINCH; echo ready; while :; do sleep 0.1; done"],
+            { PATH: "/usr/bin:/bin" },
+          );
+          expect(await resized.until("ready")).toBe(true);
+          resized.handle.resize(132, 40);
+          expect(await resized.until("40 132")).toBe(true);
+          expect(await resized.handle.exited).toBe(0);
+        } finally {
+          await box.cleanup();
+        }
+      },
+      CASE_MS,
+    );
+
+    it(
+      "hangs up, and dispose takes the container and what was left running in it",
+      async () => {
+        const box = await terminalContainer();
+        try {
+          const term = open(box.executor, ["sh", "-c", "echo up; while :; do sleep 1; done"], {
+            PATH: "/usr/bin:/bin",
+          });
+          expect(await term.until("up")).toBe(true);
+          expect(isOpenTerminal(box.name)).toBe(true);
+
+          term.handle.kill();
+          await term.handle.exited;
+          await box.executor.dispose();
+
+          expect(await box.docker("ps", "-aq", "--filter", `name=^${box.name}$`)).toBe("");
+          expect(isOpenTerminal(box.name)).toBe(false);
+        } finally {
+          await box.cleanup();
+        }
+      },
+      CASE_MS,
+    );
   });
 }
 

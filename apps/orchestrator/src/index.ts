@@ -27,6 +27,7 @@ import {
   type OutOfBandExecutor,
   type OutOfBandOpts,
   openOutOfBandExecutor,
+  openTerminalExecutor,
 } from "./executor/factory.js";
 import { createExecutorImageBuilder, type ExecutorImageBuilder } from "./executor/image-build.js";
 import { createLocalExecutor } from "./executor/local.js";
@@ -55,8 +56,8 @@ import { attachSubscriber } from "./ws/replay.js";
 import {
   authorizeTerminal,
   closeTerminal,
-  openTerminal,
-  resolveTerminalLaunch,
+  startTerminal,
+  type TerminalDeps,
   type TerminalWsData,
   terminalMessage,
 } from "./ws/terminal.js";
@@ -105,6 +106,11 @@ export interface WsServerDeps {
   ) => Promise<OutOfBandExecutor>;
   /** The guided setup's build of the executor image — one per process (`executor/image-build.ts`). */
   imageBuild: ExecutorImageBuilder;
+  /**
+   * Where the Task page's terminal runs (`openTerminalExecutor`), with `dockerHost` applied —
+   * injectable for the reason `outOfBand` is.
+   */
+  terminalExecutor: TerminalDeps["terminalExecutor"];
 }
 
 /** What a route says about its own launch; the deployment fills in the rest (`outOfBand`). */
@@ -131,6 +137,8 @@ function defaultWsDeps(): WsServerDeps {
         host: dockerHost,
       }),
     imageBuild: createExecutorImageBuilder({ host: dockerHost }),
+    terminalExecutor: (profile, opts) =>
+      openTerminalExecutor(profile, { ...opts, host: dockerHost }),
   };
 }
 
@@ -847,7 +855,7 @@ function asTerminal(ws: {
   send(data: string | Uint8Array): unknown;
   close(code?: number, reason?: string): void;
 }) {
-  return ws as Parameters<typeof openTerminal>[0];
+  return ws as Parameters<typeof startTerminal>[0];
 }
 
 /**
@@ -916,24 +924,11 @@ export function startWebSocketServer(
         return handleExecutorImagePost(req, deps, "start");
       if (pathname === "/explain" && req.method === "POST") return handleExplainPost(req, deps);
       // The Task page's terminal: its own socket, its own ticket check (see `ws/terminal.ts`).
+      // Where it runs is decided once the socket is open (`startTerminal`), not here.
       if (pathname === "/terminal") {
         const terminal = await authorizeTerminal(req.url, deps);
         if (!terminal.ok) return new Response(terminal.error, { status: terminal.status });
-        const launch = await resolveTerminalLaunch(
-          {
-            db: deps.db,
-            registry: deps.registry,
-            // Raw, not resolved: a relative root is also where runs before the fix left the home
-            // inside the worktree, and the launch looks there too.
-            worktreeRoot: orchestratorEnv().SOLOW_WORKTREE_ROOT,
-          },
-          {
-            workspaceId: terminal.data.claims.workspaceId,
-            taskId: terminal.data.claims.taskId ?? "",
-            cwd: terminal.data.cwd,
-          },
-        );
-        if (server.upgrade(req, { data: { ...terminal.data, launch } })) return undefined;
+        if (server.upgrade(req, { data: terminal.data })) return undefined;
         return new Response("websocket only", { status: 426 });
       }
 
@@ -945,7 +940,15 @@ export function startWebSocketServer(
     websocket: {
       async open(ws) {
         if (isTerminal(ws.data)) {
-          openTerminal(asTerminal(ws), createLocalExecutor(ws.data.cwd));
+          await startTerminal(asTerminal(ws), {
+            db: deps.db,
+            registry: deps.registry,
+            // Raw, not resolved: a relative root is also where runs before the fix left the home
+            // inside the worktree, and the launch looks there too.
+            worktreeRoot: orchestratorEnv().SOLOW_WORKTREE_ROOT,
+            repoCacheRoot: orchestratorEnv().SOLOW_REPO_CACHE_ROOT,
+            terminalExecutor: deps.terminalExecutor,
+          });
           return;
         }
         const data = ws.data;

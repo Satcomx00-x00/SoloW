@@ -313,3 +313,77 @@ export async function openOutOfBandExecutor(
     },
   };
 }
+
+/** Where the Task page's terminal runs, and how to end it — see `openTerminalExecutor`. */
+export type TerminalExecutor = Omit<OutOfBandExecutor, "cwd">;
+
+export interface TerminalExecutorOpts {
+  workspaceId: string;
+  taskId: string;
+  /** The worktree the terminal opens in — the local driver's root, as it has always been. */
+  cwd: string;
+  /** Where the Task's run works, from the function the run itself uses (`taskExecutorPlacement`). */
+  placement: Pick<
+    ExecutorFactoryOpts,
+    | "jailRoot"
+    | "worktreeRoot"
+    | "repoCacheRoot"
+    | "bindPaths"
+    | "transcriptStore"
+    | "checkpointStore"
+  >;
+  /** The Task's harness, probed so the terminal knows whether its conversation can be mounted. */
+  harnessCommands: readonly string[];
+  /** See `ExecutorFactoryOpts.host`. */
+  host?: Executor;
+}
+
+/**
+ * Somewhere to open the Task page's terminal: where the Task runs (roadmap B4).
+ *
+ * It used to be the orchestrator's host whatever the Executor Profile said. A Docker Task's
+ * worktree is bind-mounted at its own path, so the host had a directory to open a shell in — and
+ * the terminal mounts the Task's conversation, so for a Task that asked for a container it ran
+ * `claude --resume` on the host, holding the Task's credential, with nothing between it and the
+ * machine. That is the isolation the profile exists to buy, given away by a window.
+ *
+ * A Docker Task gets a container of its own (`ContainerRole` "terminal"): the run's image, limits
+ * and user, the run's mounts through `taskExecutorPlacement`, the run's preflight — and never the
+ * run's container, which either side's `dispose()` would otherwise remove from under the other.
+ * There is no fallback to the host on any failure; the caller reports the reason instead.
+ *
+ * Synchronous, like `createExecutorFor`: nothing is made until `preflight()`, and the caller owns
+ * `dispose()` from the moment this returns, because constructing a terminal executor is what
+ * marks its container as held (`isOpenTerminal`).
+ */
+export function openTerminalExecutor(
+  profile: { config: ExecutorConfig },
+  opts: TerminalExecutorOpts,
+): TerminalExecutor {
+  const config = profile.config;
+  if (config.kind !== "docker") {
+    if (config.kind !== "local") throw new Error(missingDriverReason(config.kind));
+    return {
+      executor: createLocalExecutor(opts.cwd),
+      preflight: async () => ({ ok: true, harnessCommands: [] }),
+      dispose: async () => {},
+    };
+  }
+  const factoryOpts: ExecutorFactoryOpts = {
+    // A connection id where a run puts its Session's: the container's name and `solow.run` label,
+    // so two windows on one Task are two containers that never adopt each other.
+    ids: { workspaceId: opts.workspaceId, taskId: opts.taskId, sessionId: randomUUID() },
+    ...opts.placement,
+    harnessCommands: opts.harnessCommands,
+    // One map for both, as `probeExecutorFor` requires.
+    probedCommands: new Map(),
+    role: "terminal",
+    ...(opts.host ? { host: opts.host } : {}),
+  };
+  const executor = createExecutorFor({ config }, factoryOpts);
+  return {
+    executor,
+    preflight: () => probeExecutorFor({ config }, factoryOpts),
+    dispose: () => executor.dispose(),
+  };
+}

@@ -85,7 +85,7 @@ Recharts.
 | # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 30 | IDE-like unified view | Task page: a left pane, Board / Brief / Changes tabs, a right rail with the review gate, and a resizable terminal pane (its width saved per browser) | 🟡 | A persisted, resizable panel layout before adding more panels | **new** react-resizable-panels |
-| 31 | Real terminal (xterm.js, PTY) | `@xterm/xterm` on a real PTY in the worktree; resumes the Task's Claude Code conversation or opens a shell. **Local executor only**: a Task on the Docker executor gets "This executor cannot open a terminal" | 🟡 | A terminal through the container executor | `existing` terminal pane |
+| 31 | Real terminal (xterm.js, PTY) | `@xterm/xterm` on a real PTY in the worktree; resumes the Task's Claude Code conversation or opens a shell. Runs where the Task runs: on the host for the local executor, and for the Docker one in a terminal container of its own with the run's image and mounts (`docker exec -it`), never falling back to the host (F07, roadmap B4) | ✅ | Built | `existing` terminal pane |
 | 32 | Code editor with LSP (Monaco) | — (the diff viewer is read-only) | ❌ | Read-only Monaco first, an LSP bridge later | **new** Monaco |
 | 33 | File tree | A tree of the changed files in the Changes tab; no browser of the whole worktree | 🟡 | A lazy listing of the worktree through the executor's jailed filesystem, which exists | **new** virtualised tree |
 | 34 | Embedded VS Code | — | ❌ | A `vscode://` deep link, not an embed | "Open in editor" menu |
@@ -192,8 +192,8 @@ Recharts.
 
 | | Count | Share |
 |---|---|---|
-| ✅ Built | 51 | 49% |
-| 🟡 Partial | 26 | 25% |
+| ✅ Built | 52 | 50% |
+| 🟡 Partial | 25 | 24% |
 | ❌ Not built | 19 | 18% |
 | ⏳ Later (0031) | 5 | 5% |
 | 🚫 Won't do | 4 | 4% |

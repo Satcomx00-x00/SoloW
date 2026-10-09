@@ -174,10 +174,11 @@ export function TaskTerminal({
               ? { kind: "failed", message: "The connection to the terminal was lost." }
               : {
                   kind: "failed",
-                  // The upgrade's refusal is not readable from a browser socket; these are the
-                  // reasons it is refused (see `authorizeTerminal`).
+                  // The upgrade's refusal is not readable from a browser socket; this is what it
+                  // refuses for once the ticket is good (see `authorizeTerminal`). Everything
+                  // after the upgrade — a container that cannot start — arrives as an error frame.
                   message:
-                    "No terminal could be opened. The task has no worktree yet — the first run creates it — or it runs in a container, whose files are not on this machine.",
+                    "No terminal could be opened: this task has no worktree yet. The first run creates it.",
                 },
         );
       };
