@@ -3,9 +3,9 @@
 # The driver spawns the harness's bare command inside the container (`executor/docker.ts`), so
 # isolation is only as available as an image with the harness in it. This one carries the two
 # SoloW comes ready for — Claude Code and opencode — plus the userland the driver's preflight
-# probes for (`REQUIRED_CONTAINER_UTILITIES`: sh, env, cat, find, mkdir, cp, test, df, base64 and
-# git). Anything a particular repository needs beyond that is the Executor Profile's prepare
-# script, which runs as root in the container before the harness starts.
+# probes for (`REQUIRED_CONTAINER_UTILITIES` in `apps/orchestrator/src/executor/docker.ts`).
+# Anything a particular repository needs beyond that is the Executor Profile's prepare script,
+# which runs as root in the container before the harness starts.
 #
 # Built with no context — `make executor-image` or `solow executor-image` pipe this file to
 # `docker build -` — so nothing from the checkout or the machine can end up in a layer. No
@@ -60,7 +60,7 @@ LABEL org.opencontainers.image.title="solow-executor" \
 
 # `procps` for its `kill` binary: the driver stops a harness with `docker exec <ctr> kill -s TERM
 # <pid>`, which needs a real executable, and a slim Debian has only the shell builtin — a stop
-# that silently did nothing. The preflight cannot see this (`command -v kill` finds the builtin).
+# that silently did nothing. The preflight refuses an image without it.
 #
 # Not version-pinned (DL3008): the base tag fixes the Debian release, and pinning a package
 # version inside it fails the build as soon as a security update replaces that version upstream.

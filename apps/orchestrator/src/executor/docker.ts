@@ -144,6 +144,9 @@ export function isExecutorUnavailable(cause: unknown): boolean {
  * `base64` is on the list because the environment mechanism below is built on it, so a
  * distroless or scratch image fails the preflight legibly instead of producing a harness with an
  * empty environment and no explanation. Distroless images are, deliberately, unsupported.
+ *
+ * `kill` because stopping a harness is `docker exec <container> kill -s TERM <pid>`, which needs
+ * the executable: a slim Debian has only the shell's builtin, and there a Stop did nothing at all.
  */
 export const REQUIRED_CONTAINER_UTILITIES = [
   "sh",
@@ -156,6 +159,7 @@ export const REQUIRED_CONTAINER_UTILITIES = [
   "df",
   "base64",
   "git",
+  "kill",
 ] as const;
 
 /**
@@ -1211,6 +1215,10 @@ export async function runPrepareScript(
  * that it reports only its first argument and exits 0, so an image missing `git`, `find` and
  * `base64` passes it cleanly. The loop asks about each one separately and prints the ones that
  * are absent, which is the answer the caller needs to name them.
+ *
+ * Present means a file on `PATH`, not anything `command -v` answers for. These are exec'd by
+ * `docker exec`, which never sees a shell's builtins: `command -v kill` prints `kill` in an image
+ * with no kill binary, and the probe passed an image that could not stop its harness.
  */
 export async function probeCommands(
   host: Executor,
@@ -1227,7 +1235,7 @@ export async function probeCommands(
     name,
     "sh",
     "-c",
-    'for c in "$@"; do command -v "$c" >/dev/null 2>&1 || echo "$c"; done',
+    'for c in "$@"; do case "$(command -v "$c" 2>/dev/null)" in /*) ;; *) echo "$c" ;; esac; done',
     "sh",
     ...commands,
   ]);
