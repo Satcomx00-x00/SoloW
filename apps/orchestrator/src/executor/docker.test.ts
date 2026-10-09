@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import {
   CONTAINER_HOME,
   containerName,
+  containerNameFor,
   createDockerExecutor,
   type DockerExecutorConfig,
   type DockerExecutorOpts,
@@ -1131,5 +1132,86 @@ describe("dispose", () => {
 
     // A daemon that has gone away has disposed of the container more thoroughly than we could.
     await expect(executor.dispose()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * One-shot containers — an Explain, or the setup's test, run where the Task runs (roadmap B4).
+ *
+ * A one-shot shares the Task's image, limits and preflight and nothing else, and every case here
+ * is one way the "nothing else" could fail: the Task's name (adopting its live container, and then
+ * `dispose()` removing it), the Task's mounts, or a lookup the Task's own run would answer by
+ * removing the throwaway as a stranger.
+ */
+describe("one-shot containers", () => {
+  const SCRATCH = `${WORKTREE_ROOT}/.solow-explain-abc123`;
+  const REQUEST: DockerIds = { workspaceId: "ws-1", taskId: "task-1", sessionId: "req-1" };
+  const oneShot = (overrides: Partial<DockerExecutorOpts> = {}) =>
+    opts({ jailRoot: SCRATCH, bindPaths: [], role: "oneshot", ...overrides });
+
+  it("is named for its request and never for the Task it is about", () => {
+    const name = containerNameFor(REQUEST, oneShot());
+
+    expect(name).toMatch(/^solow-oneshot-[0-9a-f]{12}$/);
+    // The very ids a run of this Task would derive its own container's name from.
+    expect(name).not.toBe(containerName(REQUEST, DEPLOYMENT));
+    expect(containerNameFor(REQUEST, opts())).toBe(containerName(REQUEST, DEPLOYMENT));
+    // Two requests about one Task are two containers, so one Explain never adopts another's.
+    expect(containerNameFor({ ...REQUEST, sessionId: "req-2" }, oneShot())).not.toBe(name);
+  });
+
+  it("mounts only its scratch directory and the profile's own mounts, under its own role", async () => {
+    const host = fakeHost();
+    await ensureContainer(host.executor, CONFIG, { ...REQUEST, taskId: "" }, oneShot());
+
+    const run = host.calls.find((cmd) => cmd[1] === "run") ?? [];
+    expect(run[run.indexOf("--name") + 1]).toBe(containerNameFor(REQUEST, oneShot()));
+    const labels = run.filter((_, i) => run[i - 1] === "--label");
+    expect(labels).toContain("solow.role=oneshot");
+    expect(labels).toContain("solow.run=req-1");
+    // The setup's test is about no Task; an empty label would be a filter nobody can write.
+    expect(labels.some((label) => label.startsWith("solow.task="))).toBe(false);
+    expect(run.filter((_, i) => run[i - 1] === "--mount")).toEqual([
+      "type=bind,source=/srv/data,target=/data,readonly",
+      `type=bind,source=${SCRATCH},target=${SCRATCH}`,
+    ]);
+  });
+
+  it("looks only for its own request's container, and a Task's run only for its own role", async () => {
+    const filters = (cmd: string[] | undefined) =>
+      (cmd ?? []).filter((_, i, all) => all[i - 1] === "--filter");
+
+    const oneShotHost = fakeHost();
+    await ensureContainer(oneShotHost.executor, CONFIG, REQUEST, oneShot());
+    // Everything this lookup finds that is not adoptable is removed — so it must never be able to
+    // find the Task's container, whatever labels the two share.
+    expect(filters(oneShotHost.calls.find((cmd) => cmd[1] === "ps"))).toEqual([
+      "label=solow.managed=true",
+      `label=solow.deployment=${DEPLOYMENT}`,
+      "label=solow.role=oneshot",
+      "label=solow.run=req-1",
+    ]);
+
+    const runHost = fakeHost();
+    await ensureContainer(runHost.executor, CONFIG, IDS, opts());
+    // And the mirror image: a Task's run would otherwise find an Explain about it and `rm -f` it.
+    expect(filters(runHost.calls.find((cmd) => cmd[1] === "ps"))).toEqual([
+      "label=solow.managed=true",
+      `label=solow.deployment=${DEPLOYMENT}`,
+      "label=solow.role=session",
+      "label=solow.workspace=ws-1",
+      "label=solow.task=task-1",
+    ]);
+  });
+
+  it("removes its own container on dispose, never the Task's", async () => {
+    const host = fakeHost();
+    const executor = createDockerExecutor(host.executor, CONFIG, REQUEST, oneShot());
+
+    await executor.dispose();
+
+    expect(host.calls.filter((cmd) => cmd[1] === "rm")).toEqual([
+      ["docker", "rm", "-f", containerNameFor(REQUEST, oneShot())],
+    ]);
   });
 });

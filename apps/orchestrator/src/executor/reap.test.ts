@@ -34,7 +34,7 @@ import {
   ensureContainer,
   ORCHESTRATOR_EPOCH,
 } from "./docker.js";
-import { REAP_GRACE_MS, reapOrphanedContainers } from "./reap.js";
+import { ONE_SHOT_MAX_AGE_MS, REAP_GRACE_MS, reapOrphanedContainers } from "./reap.js";
 import type { ExecResult, Executor } from "./types.js";
 
 /**
@@ -211,10 +211,14 @@ interface ContainerRow {
    * one that has stopped, where the exec itself fails.
    */
   owner?: string | null;
+  /** `session` unless stated — the `solow.role` label, which decides which enumeration lists it. */
+  role?: "session" | "oneshot";
 }
 
 function psLine(row: ContainerRow): string {
   const age = row.ageMs ?? REAP_GRACE_MS * 3;
+  // The one-shot pass asks for two columns, not five (`reapAbandonedOneShots`).
+  if (row.role === "oneshot") return [row.name, dockerTime(new Date(Date.now() - age))].join("\t");
   return [
     row.name,
     row.workspaceId ?? WS,
@@ -239,7 +243,11 @@ function fakeHost(
       const scripted = onExec?.(cmd);
       if (scripted) return { stdout: "", stderr: "", exitCode: 0, ...scripted };
       if (cmd[1] === "ps") {
-        return { stdout: rows.map(psLine).join("\n"), stderr: "", exitCode: 0 };
+        // Answered per role, as the daemon would filter it: a fake that listed every row for
+        // both enumerations would have each pass judge the other's containers by its rules.
+        const role = cmd.find((arg) => arg.startsWith("label=solow.role="))?.split("=")[2];
+        const listed = rows.filter((row) => (row.role ?? "session") === role);
+        return { stdout: listed.map(psLine).join("\n"), stderr: "", exitCode: 0 };
       }
       if (cmd[1] === "exec" && cmd[3] === "cat") {
         const owner = rows.find((row) => row.name === cmd[2])?.owner;
@@ -291,6 +299,97 @@ describe("enumeration", () => {
       "--format",
       '{{.Names}}\t{{.Label "solow.workspace"}}\t{{.Label "solow.task"}}\t{{.Label "solow.run"}}\t{{.CreatedAt}}',
     ]);
+  });
+});
+
+/**
+ * One-shot containers — an Explain, or the guided setup's test, run where the Task runs (B4).
+ *
+ * The two properties the request's container identity exists for: the reaper must not remove one
+ * while its request is still answering — and nothing in the Task table can say so, because a
+ * request writes nothing there — and it must eventually remove one whose orchestrator died
+ * mid-request, which no `finally` will ever reach. The claim is the evidence for both.
+ */
+describe("one-shot containers", () => {
+  it("asks for this deployment's one-shots in an enumeration of their own", async () => {
+    const db = createTestDb();
+    const host = fakeHost([]);
+
+    await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE);
+
+    // Never the session pass's list: there a one-shot labelled with the Task it explains would be
+    // judged as that Task's container — "left by a previous run" — and removed mid-answer.
+    expect(host.calls[1]).toEqual([
+      orchestratorEnv().SOLOW_DOCKER_BIN,
+      "ps",
+      "-a",
+      "--filter",
+      "label=solow.managed=true",
+      "--filter",
+      "label=solow.role=oneshot",
+      "--filter",
+      `label=solow.deployment=${expectedDeployment()}`,
+      "--format",
+      "{{.Names}}\t{{.CreatedAt}}",
+    ]);
+  });
+
+  it("leaves a request's container alone while this process holds it, with no Task row at all", async () => {
+    const db = createTestDb();
+    // Past the grace, no Task, no registry entry, no Session: every session filter above would
+    // call this an orphan. The claim is what says a request is still in flight.
+    const host = fakeHost([
+      { name: "solow-oneshot-live", taskId: "", runId: "req-1", role: "oneshot" },
+    ]);
+
+    expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE)).toBe(0);
+    expect(host.removed).toEqual([]);
+  });
+
+  it("removes one a crashed predecessor left mid-request", async () => {
+    const db = createTestDb();
+    const host = fakeHost([
+      { name: "solow-oneshot-dead", taskId: "", runId: "req-1", role: "oneshot", owner: "0ld" },
+      { name: "solow-oneshot-unclaimed", taskId: "", runId: "req-2", role: "oneshot", owner: null },
+    ]);
+
+    expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE)).toBe(2);
+    expect(host.removed).toEqual(["solow-oneshot-dead", "solow-oneshot-unclaimed"]);
+  });
+
+  it("leaves a young one alone even unclaimed: the claim lands just after `docker run`", async () => {
+    const db = createTestDb();
+    const host = fakeHost([
+      {
+        name: "solow-oneshot-new",
+        taskId: "",
+        runId: "req-1",
+        role: "oneshot",
+        owner: null,
+        ageMs: 1_000,
+      },
+    ]);
+
+    expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), NOW)).toBe(0);
+    expect(host.removed).toEqual([]);
+  });
+
+  it("removes one this process holds once it is older than any request", async () => {
+    const db = createTestDb();
+    // The `finally` whose `docker rm -f` failed: claimed by a process that is still up, so age
+    // is the only rule left that can see it.
+    const host = fakeHost([
+      {
+        name: "solow-oneshot-leak",
+        taskId: "",
+        runId: "req-1",
+        role: "oneshot",
+        ageMs: ONE_SHOT_MAX_AGE_MS + 1_000,
+      },
+    ]);
+
+    expect(await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE)).toBe(1);
+    expect(host.removed).toEqual(["solow-oneshot-leak"]);
   });
 });
 
