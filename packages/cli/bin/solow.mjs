@@ -549,6 +549,22 @@ function buildEnv(opts) {
   };
 }
 
+/**
+ * Set on the engine's process alone, as scripts/lib/engine-env.sh's `supervise_engine` does.
+ * inngest-cli reports its own usage (`cli/command.executed`, then `cli/dev_ui.loaded` in bursts
+ * every minute, with a stored device id) through an embedded SDK client that follows
+ * INNGEST_EVENT_API_BASE_URL, else INNGEST_BASE_URL, else Inngest Cloud, and has no switch to
+ * turn it off (1.46). With INNGEST_BASE_URL it posts them to the engine itself, which rejects
+ * Inngest's key in a log line each; without it they leave the machine. Port 0 cannot be connected
+ * to, so they fail on the spot. Never in `buildEnv`: the orchestrator's SDK reads the same
+ * variable for the events SoloW does send. The update notice is off because the version is the
+ * one this package pins, not the user's to bump.
+ */
+const ENGINE_ONLY_ENV = {
+  INNGEST_EVENT_API_BASE_URL: "http://127.0.0.1:0",
+  INNGEST_NO_UPDATE_NOTIFIER: "1",
+};
+
 // ---------------------------------------------------------------------------- ports
 
 function portFree(p) {
@@ -949,7 +965,7 @@ async function main() {
       "--host",
       bindHost(),
     ],
-    env,
+    { ...env, ...ENGINE_ONLY_ENV },
   );
 
   // Next's standalone server reads its port and host from the environment; it takes no flags.

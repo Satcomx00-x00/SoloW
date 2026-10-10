@@ -160,16 +160,8 @@ done
 echo "[start] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
 supervise orchestrator bun run apps/orchestrator/src/main.ts
 
-# `inngest start` persists to --sqlite-dir (what `dev --persist` did), shared with dev.sh. The
-# signing/event keys come from the environment, not argv, so they stay out of `ps`.
-# SOLOW_INNGEST_ARGS appends flags — e.g. `--connect-gateway-port` and the two gRPC ports, which
-# bind fixed ports on every interface and so collide when a second stack runs on this machine.
 echo "[start] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
-# shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
-supervise inngest bunx inngest-cli start \
-    --sqlite-dir "$GC_DIR/inngest" \
-    -u "$SOLOW_INNGEST_SDK_URL" \
-    -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
+supervise_engine
 
 # `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
 echo "[start] web           → http://localhost:$SOLOW_WEB_PORT  (built, listening on $SOLOW_BIND_HOST)"

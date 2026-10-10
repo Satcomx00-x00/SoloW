@@ -59,6 +59,9 @@ inside npm packages, selected by platform:
 Each is an optional dependency constrained by `os`/`cpu`, so npm installs exactly one — yours —
 and skips the rest. There is no postinstall hook to run and nothing is fetched from GitHub or any
 CDN, which is what makes this work behind an airgap or against an internal registry mirror.
+Running, it stays local too: the Inngest binary reports its own usage to Inngest Cloud by default,
+with no switch to turn that off, so SoloW points those reports at a port nothing listens on and
+turns off its update check.
 
 The Inngest packages exist because `inngest-cli` itself ships only a placeholder and downloads
 the real binary in a postinstall hook — unusable when install scripts are blocked (npm 12 blocks

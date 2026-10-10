@@ -1,6 +1,6 @@
 # shellcheck shell=sh
-# Sourced by scripts/dev.sh and scripts/start.sh (needs $GC_DIR, $SOLOW_BIND_HOST, $SOLOW_WS_PORT
-# and $SOLOW_INNGEST_PORT set).
+# Sourced by scripts/dev.sh and scripts/start.sh after scripts/lib/supervise.sh (needs $GC_DIR,
+# $SOLOW_BIND_HOST, $SOLOW_WS_PORT and $SOLOW_INNGEST_PORT set).
 #
 # Secrets for the trust boundaries around the stack (FINDINGS B3, F6):
 #   - SOLOW_ORCHESTRATOR_SECRET: the web app presents it on POST /events; without it anyone who
@@ -52,6 +52,31 @@ INNGEST_BASE_URL="http://$SOLOW_INTERNAL_HOST:$SOLOW_INNGEST_PORT"
 # inngest.send() (Decision 0004).
 SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://$SOLOW_INTERNAL_HOST:$SOLOW_WS_PORT}"
 # What the engine calls to sync and drive the functions.
-# shellcheck disable=SC2034 # read by the launcher that sources this file
 SOLOW_INNGEST_SDK_URL="http://$SOLOW_INTERNAL_HOST:$SOLOW_WS_PORT/api/inngest"
 export INNGEST_BASE_URL SOLOW_ORCHESTRATOR_URL
+
+# Starts `inngest start` under its supervisor; the one launch line dev.sh and start.sh share.
+#
+# `inngest start` persists queued events and in-flight runs to --sqlite-dir, so a run mid-round
+# survives a restart. The signing and event keys come from the environment, not argv, so they stay
+# out of `ps`. SOLOW_INNGEST_ARGS appends flags, e.g. to move the connect gateway and gRPC ports,
+# which bind fixed ports on every interface and so collide when a second stack runs here.
+#
+# The two variables are for the engine alone. inngest-cli reports its own usage
+# (`cli/command.executed`, then `cli/dev_ui.loaded` in bursts every minute, with a stored device
+# id) through an embedded SDK client that follows INNGEST_EVENT_API_BASE_URL, else
+# INNGEST_BASE_URL, else Inngest Cloud — and it has no switch to turn that off (1.46). With the
+# INNGEST_BASE_URL exported above it posted them to itself with Inngest's key, which the engine
+# rejected: the "rejecting event; event key not recognized" lines. Port 0 cannot be connected to,
+# so they now fail on the spot, with no traffic and no log line. The orchestrator must not get it:
+# its SDK reads the same variable for the events SoloW does send. The update notifier is off for
+# the same reason, and because the version is the one package.json pins, not the user's to bump.
+supervise_engine() {
+    # shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
+    supervise inngest env INNGEST_EVENT_API_BASE_URL=http://127.0.0.1:0 \
+        INNGEST_NO_UPDATE_NOTIFIER=1 \
+        bunx inngest-cli start \
+        --sqlite-dir "$GC_DIR/inngest" \
+        -u "$SOLOW_INNGEST_SDK_URL" \
+        -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
+}
