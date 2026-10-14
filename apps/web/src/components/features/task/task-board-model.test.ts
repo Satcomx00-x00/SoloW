@@ -7,9 +7,11 @@ import {
   boardTally,
   needsYouCount,
   passOf,
+  persistedStepFacts,
   RUN_COLUMN_ID,
   type StepHistory,
   stepFacts,
+  withLiveStepFacts,
 } from "./task-board-model";
 import type { PermissionRow, TranscriptRow } from "./transcript";
 import type { SteppedStep } from "./workflow-steps";
@@ -293,6 +295,50 @@ describe("stepFacts", () => {
       showGate: false,
     });
     expect(boardTally(columns).todos).toEqual({ done: 1, of: 2 });
+  });
+});
+
+describe("withLiveStepFacts", () => {
+  // The page folds the persisted log once and lays each frame's live events over that one fold,
+  // so the fold has to come out of every frame exactly as it went in.
+  const decision = (id: string, choice: string): DecisionWidget =>
+    ({
+      kind: "decision",
+      id,
+      question: id,
+      options: [],
+      chosen: choice,
+    }) as unknown as DecisionWidget;
+
+  it("lays live frames over the fold without writing into it", () => {
+    const base = persistedStepFacts([
+      persisted(1, { kind: "widget", widgetId: "w-1", widget: decision("d1", "a") }, "impl"),
+    ]);
+    const live = [
+      {
+        kind: "widget",
+        taskId: "t",
+        sessionId: SESSION,
+        seq: 2,
+        workflowStepId: "impl",
+        widgetId: "w-2",
+        widget: decision("d2", "b"),
+      },
+    ] as TaskEvent[];
+
+    const facts = withLiveStepFacts(base, live, SESSION);
+
+    expect([...(facts.decisions.get("impl")?.keys() ?? [])]).toEqual(["d1", "d2"]);
+    expect([...(base.decisions.get("impl")?.keys() ?? [])]).toEqual(["d1"]);
+    expect(base.origin.has("decision:d2")).toBe(false);
+    // And it is the same reading the one-pass fold gives.
+    expect(facts).toEqual(
+      stepFacts(
+        [persisted(1, { kind: "widget", widgetId: "w-1", widget: decision("d1", "a") }, "impl")],
+        live,
+        SESSION,
+      ),
+    );
   });
 });
 

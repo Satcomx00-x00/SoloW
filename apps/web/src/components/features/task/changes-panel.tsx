@@ -9,7 +9,7 @@ import type {
 } from "@solow/contracts";
 import { primaryTaskRepository } from "@solow/core";
 import { FileMinus, Lock, Scissors, TriangleAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { scmFromCapturedDiff, splitPatchByFile } from "./captured-scm";
 import { summariseDiff } from "./change-summary";
 import { DiffEditor } from "./diff-editor";
@@ -31,6 +31,9 @@ import { SourceControlPanel, type ViewedFiles } from "./source-control-panel";
  */
 
 const CAPTURED_REASON = "Captured from the harness's last turn — read-only.";
+/** A record is not a working tree: staging, discarding and refreshing are not on offer here. */
+const noop = () => {};
+const NO_REPOSITORIES: readonly TaskRepositoryDto[] = [];
 
 /**
  * The reviewer's ticks, keyed across repositories (`draftFileKey` in `use-review-draft`).
@@ -70,7 +73,6 @@ function RepositoryChanges({
   // The selected file's section, or the whole patch when nothing is selected — which is what the
   // panel showed before it had a file list, so the first view of a Task is unchanged.
   const patch = (selected && sections.get(selected)) || diff.patch;
-  const noop = () => {};
   // The one file on screen, when there is one: a selected row, or a diff of a single file.
   const shownPath = selected ?? (diff.files.length === 1 ? (diff.files[0]?.path ?? null) : null);
   const repositoryId = diff.repositoryId ?? null;
@@ -254,9 +256,14 @@ function GroupHeading({ group, captured }: { group: ReviewGroup; captured: boole
  * would be wrong about what they just approved. `groupChanges` decides what the groups are; this
  * only draws them.
  */
-export function ChangesPanel({
+/*
+ * Memoized because its tab is kept mounted: while a run is live the Task page renders once per
+ * stream frame, and every one of those re-drew the whole captured patch underneath, hidden or
+ * not. Nothing it is handed changes with a frame.
+ */
+export const ChangesPanel = memo(function ChangesPanel({
   diffs,
-  repositories = [],
+  repositories = NO_REPOSITORIES,
   repositoryName,
   captured = true,
   ticks,
@@ -349,4 +356,4 @@ export function ChangesPanel({
       ))}
     </div>
   );
-}
+});

@@ -133,14 +133,67 @@ export function stepFacts(
   live: readonly TaskEvent[],
   liveSessionId: string | undefined,
 ): StepFacts {
+  return withLiveStepFacts(persistedStepFacts(persisted), live, liveSessionId);
+}
+
+/**
+ * The persisted half of `stepFacts`, on its own so the page can fold it once.
+ *
+ * The log `session.get` returned does not change between stream frames, and a long run is
+ * thousands of events: folding it again on every frame, only to lay the same few live frames on
+ * top, was the bulk of the work a frame cost.
+ */
+export function persistedStepFacts(persisted: readonly SessionEventDto[]): StepFacts {
   const facts: StepFacts = {
     plan: new Map(),
     todos: new Map(),
     decisions: new Map(),
     origin: new Map(),
   };
+  for (const event of persisted) {
+    const step = event.workflowStepId ?? null;
+    const p = event.payload;
+    if (p.kind === "todos") {
+      facts.todos.set(step, p.items);
+      facts.origin.set(`todos:${step ?? ""}`, { sessionId: event.sessionId, seq: event.seq });
+    } else if (p.kind === "widget" && p.widget.kind === "step_card") {
+      facts.plan.set(step, p.widget);
+      facts.origin.set(`plan:${step ?? ""}`, { sessionId: event.sessionId, seq: event.seq });
+    } else if (p.kind === "widget" && p.widget.kind === "decision") {
+      const byId = facts.decisions.get(step) ?? new Map<string, DecisionWidget>();
+      // Deleted first so a re-emission moves to the end: arrival order is the board's order.
+      byId.delete(p.widget.id);
+      byId.set(p.widget.id, p.widget);
+      facts.decisions.set(step, byId);
+      facts.origin.set(`decision:${p.widget.id}`, { sessionId: event.sessionId, seq: event.seq });
+    }
+  }
+  return facts;
+}
+
+/**
+ * The live frames laid over a persisted fold, which is left as it was: the maps are copied
+ * (a Step's decisions only once a live frame touches them), never written through.
+ */
+export function withLiveStepFacts(
+  base: StepFacts,
+  live: readonly TaskEvent[],
+  liveSessionId: string | undefined,
+): StepFacts {
+  const facts: StepFacts = {
+    plan: new Map(base.plan),
+    todos: new Map(base.todos),
+    decisions: new Map(base.decisions),
+    origin: new Map(base.origin),
+  };
+  const copied = new Set<string | null>();
   const decide = (step: string | null, widget: DecisionWidget) => {
-    const byId = facts.decisions.get(step) ?? new Map<string, DecisionWidget>();
+    const inherited = facts.decisions.get(step);
+    const byId =
+      inherited && !copied.has(step)
+        ? new Map(inherited)
+        : (inherited ?? new Map<string, DecisionWidget>());
+    copied.add(step);
     // Deleted first so a re-emission moves to the end: arrival order is the board's order.
     byId.delete(widget.id);
     byId.set(widget.id, widget);
@@ -148,20 +201,6 @@ export function stepFacts(
   };
   const at = (key: string, sessionId: string, seq: number) =>
     facts.origin.set(key, { sessionId, seq });
-  for (const event of persisted) {
-    const step = event.workflowStepId ?? null;
-    const p = event.payload;
-    if (p.kind === "todos") {
-      facts.todos.set(step, p.items);
-      at(`todos:${step ?? ""}`, event.sessionId, event.seq);
-    } else if (p.kind === "widget" && p.widget.kind === "step_card") {
-      facts.plan.set(step, p.widget);
-      at(`plan:${step ?? ""}`, event.sessionId, event.seq);
-    } else if (p.kind === "widget" && p.widget.kind === "decision") {
-      decide(step, p.widget);
-      at(`decision:${p.widget.id}`, event.sessionId, event.seq);
-    }
-  }
   for (const event of live) {
     if (!("sessionId" in event) || event.sessionId !== liveSessionId) continue;
     const step = ("workflowStepId" in event ? event.workflowStepId : null) ?? null;

@@ -40,6 +40,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  type ComponentProps,
   type CSSProperties,
   type ReactNode,
   useCallback,
@@ -98,8 +99,9 @@ import {
   boardColumns,
   boardTally,
   needsYou,
+  persistedStepFacts,
   type StepHistory,
-  stepFacts,
+  withLiveStepFacts,
 } from "./task-board-model";
 import {
   AsksNode,
@@ -122,7 +124,7 @@ import {
   type StepCardWidget,
   type TaskCompleteWidget,
 } from "./todo-list";
-import { buildTranscript, inStepScope } from "./transcript";
+import { buildTranscriptFrom, inStepScope, preparePersistedTranscript } from "./transcript";
 import { TranscriptPrunedNotice } from "./transcript-pruned-notice";
 import { useStepScope, WorkflowPosition } from "./workflow-steps";
 
@@ -149,6 +151,8 @@ const NO_DIFFS: TaskDiffDto[] = [];
 const NO_ATTACHMENTS: TaskRepositoryDto[] = [];
 const NO_ROUNDS: SessionRoundDto[] = [];
 const NO_STEP_IDS: readonly string[] = [];
+const NO_COLUMNS: BoardColumn[] = [];
+const NO_GATE_LINES = { headline: "", detail: "" };
 
 const STREAM_LABEL: Record<string, string> = {
   idle: "Not streaming",
@@ -656,6 +660,9 @@ const TERMINAL_DEFAULT = 520;
 const terminalMax = () =>
   typeof window === "undefined" ? 1200 : Math.max(TERMINAL_MIN, window.innerWidth * 0.65);
 
+const clampTerminalWidth = (next: number) =>
+  Math.round(Math.min(terminalMax(), Math.max(TERMINAL_MIN, next)));
+
 type TerminalWidth = ReturnType<typeof useTerminalWidth>;
 
 /**
@@ -673,7 +680,7 @@ function useTerminalWidth() {
     }
   });
   const setWidth = useCallback((next: number) => {
-    const clamped = Math.round(Math.min(terminalMax(), Math.max(TERMINAL_MIN, next)));
+    const clamped = clampTerminalWidth(next);
     setWidthState(clamped);
     try {
       window.localStorage.setItem(TERMINAL_WIDTH_KEY, String(clamped));
@@ -700,15 +707,31 @@ function TerminalResizer({ handle }: { handle: TerminalWidth }) {
       className="-left-1 absolute inset-y-0 z-10 hidden w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-transparent after:transition-colors hover:after:bg-ring focus-visible:after:bg-ring md:block"
       onPointerDown={(event) => {
         event.preventDefault();
+        const separator = event.currentTarget;
+        // The pane whose `--terminal-width` this edge drives.
+        const pane = separator.parentElement;
         const startX = event.clientX;
         const start = width;
-        const move = (e: PointerEvent) => setWidth(start + (startX - e.clientX));
+        let dragged = start;
+        /*
+         * The width lives in `TaskWorkspace`, so setting it per pointer event re-rendered the whole
+         * page — board, diff and all — and wrote `localStorage`, dozens of times a second. The
+         * drag paints straight onto the pane instead, and the width is set once, on release.
+         */
+        const move = (e: PointerEvent) => {
+          dragged = clampTerminalWidth(start + (startX - e.clientX));
+          pane?.style.setProperty("--terminal-width", `${dragged}px`);
+          separator.setAttribute("aria-valuenow", String(dragged));
+        };
         const up = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
+          window.removeEventListener("pointercancel", up);
+          setWidth(dragged);
         };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
       }}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 80 : 20;
@@ -716,6 +739,33 @@ function TerminalResizer({ handle }: { handle: TerminalWidth }) {
         else if (event.key === "ArrowRight") setWidth(width - step);
         else return;
         event.preventDefault();
+      }}
+    />
+  );
+}
+
+/**
+ * The composer with the text it is holding.
+ *
+ * The draft is the composer's own state, not the page's: held in `TaskWorkspace`, every keystroke
+ * re-rendered the whole Task page — the board's nodes, the kept-mounted Brief and Changes panels
+ * and every diff row in them — to change one textarea. Only a send needs to reach the page.
+ */
+function SteerComposer({
+  onSend,
+  ...props
+}: Omit<ComponentProps<typeof HarnessComposer>, "value" | "onChange" | "onSubmit"> & {
+  /** True when the text was taken, sent or queued, and the field should clear. */
+  onSend: (text: string) => boolean;
+}) {
+  const [input, setInput] = useState("");
+  return (
+    <HarnessComposer
+      {...props}
+      value={input}
+      onChange={setInput}
+      onSubmit={() => {
+        if (onSend(input)) setInput("");
       }}
     />
   );
@@ -962,9 +1012,33 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         : live.events.filter((event) => inStepScope(event, scope.selected)),
     [live.events, scope.selected],
   );
-  const rows = useMemo(() => buildTranscript(events, liveEvents), [events, liveEvents]);
+  // The persisted half prepared once per answer, so a frame folds in only what it brought.
+  const persistedTranscript = useMemo(() => preparePersistedTranscript(events), [events]);
+  const rows = useMemo(
+    () => buildTranscriptFrom(persistedTranscript, liveEvents),
+    [persistedTranscript, liveEvents],
+  );
 
   const liveSessionId = latest?.id;
+  /*
+   * The persisted half of each reading below, folded once per `session.get` answer. The stream
+   * re-renders this page once per animation frame while a run is live, and every one of these
+   * used to walk the whole persisted log again — thousands of events on a long run — to lay the
+   * same few live frames on top.
+   */
+  const persistedStepCard = useMemo(() => latestStepCard(events), [events]);
+  const persistedCompletion = useMemo(() => latestCompletion(events), [events]);
+  const persistedDecisions = useMemo(() => {
+    const byId = new Map<string, DecisionWidget>();
+    for (const event of events) {
+      const payload = event.payload;
+      if (payload.kind === "widget" && payload.widget.kind === "decision") {
+        byId.set(payload.widget.id, payload.widget);
+      }
+    }
+    return byId;
+  }, [events]);
+  const persistedFacts = useMemo(() => persistedStepFacts(events), [events]);
   // The harness's plan as a `step_card` widget, from both of the page's sources: `session.get` holds
   // it as it stood when the query ran and the socket holds everything since, so live wins — from
   // the Session on screen only, because `seq` restarts per Session (see `latestStepCard`).
@@ -978,20 +1052,14 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       )
         return event.widget;
     }
-    return latestStepCard(events);
-  }, [events, live.events, liveSessionId]);
+    return persistedStepCard;
+  }, [persistedStepCard, live.events, liveSessionId]);
   /**
    * The decisions the harness emitted, latest per id, from both sources (point 3). They are on
    * the board as nodes, and the gate waits for each to be settled.
    */
   const decisions = useMemo<DecisionWidget[]>(() => {
-    const byId = new Map<string, DecisionWidget>();
-    for (const event of events) {
-      const payload = event.payload;
-      if (payload.kind === "widget" && payload.widget.kind === "decision") {
-        byId.set(payload.widget.id, payload.widget);
-      }
-    }
+    const byId = new Map(persistedDecisions);
     for (const event of live.events) {
       if (
         event.kind === "widget" &&
@@ -1002,15 +1070,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       }
     }
     return [...byId.values()];
-  }, [events, live.events, liveSessionId]);
+  }, [persistedDecisions, live.events, liveSessionId]);
   /**
    * What the board files under each Step: its plan, its todo list, its decisions. The workspace's
    * own `stepCard` and `decisions` above are the Session-wide answers the gate needs; this is the
    * same reading split by where it happened.
    */
   const facts = useMemo(
-    () => stepFacts(events, live.events, liveSessionId),
-    [events, live.events, liveSessionId],
+    () => withLiveStepFacts(persistedFacts, live.events, liveSessionId),
+    [persistedFacts, live.events, liveSessionId],
   );
   /**
    * Which Steps finished, and when (`session.stepDecisions`): how the board tells a Step that
@@ -1047,8 +1115,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       )
         return event.widget;
     }
-    return latestCompletion(events);
-  }, [events, live.events, liveSessionId]);
+    return persistedCompletion;
+  }, [persistedCompletion, live.events, liveSessionId]);
   const openItems = useMemo(() => openItemsOf(completion, stepCard), [completion, stepCard]);
   // The count on the Review tab: how many criteria the reviewer has not ticked. The same query
   // the panel makes — React Query hands both the one response.
@@ -1058,7 +1126,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   );
   const briefCriteria = briefQuery.data?.criteria.length ?? null;
 
-  const [input, setInput] = useState("");
   // The decision this page last sent, held until the Task row moves on (see `decisionSent`).
   const [sent, setSent] = useState<{
     sessionId: string;
@@ -1267,9 +1334,102 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }),
     [draft.setNotes, draft.draft.notes],
   );
+  // One object for as long as the draft holds still, so the memoized Changes panel does too.
+  const ticks = useMemo(
+    () => ({
+      viewed: draft.viewed,
+      onToggle: draft.toggleViewed,
+      notes: draft.draft.notes,
+      ...noteEdits,
+    }),
+    [draft.viewed, draft.toggleViewed, draft.draft.notes, noteEdits],
+  );
   const reviewGroups = useMemo(
     () => groupChanges(capturedDiffs, attachments, nameFor),
     [capturedDiffs, attachments, nameFor],
+  );
+
+  /*
+   * The board's inputs, above the guards so they can be memoized.
+   *
+   * The board turns them into React Flow nodes, and it rebuilds every node — and redraws every
+   * card — whenever `columns` or one of its callbacks is a new value. Built inline below the
+   * guards, all of them were new on every render of this page: each keystroke in the
+   * request-changes note, each dialog opening, the terminal pane toggling. Now the nodes change
+   * when something they draw does.
+   */
+  const shown = task.data;
+  const taskState = shown?.state ?? null;
+  /**
+   * The gate's footer — Approve, Retry, Launch, Open review — said once on the page: in the gate
+   * dialog, which the gate card on the board and the strip under the brief and the change both
+   * open. One copy, so there is one control of each name on the page and one remark box bound to
+   * the draft. It never points at a question the harness is stopped on (`waiting`): that question
+   * is a card on the board, answered from its own dialog.
+   */
+  const gateShown =
+    shown !== undefined &&
+    deleted === null &&
+    (shown.state !== "running" || canOpenReview(shown) || shown.completedAt !== null);
+  const columns = useMemo(
+    () =>
+      taskState === null
+        ? NO_COLUMNS
+        : boardColumns({
+            stepped: scope.stepped,
+            state: taskState,
+            home: scope.selected,
+            facts,
+            rows,
+            showGate: gateShown,
+            history: stepHistory,
+          }),
+    [taskState, scope.stepped, scope.selected, facts, rows, gateShown, stepHistory],
+  );
+  /**
+   * What Follow live pans to: the newest thing waiting on a person, else the newest card under
+   * the Step the run is on. A todo ticking is not news; a question arriving is.
+   */
+  const latestKey = useMemo(() => {
+    if (taskState === null) return null;
+    const asks = columns.flatMap((column) => column.items).filter((i) => needsYou(i, taskState));
+    return asks.at(-1)?.key ?? columns.find((column) => column.current)?.items.at(-1)?.key ?? null;
+  }, [columns, taskState]);
+  const outstandingCount = dependencies.outstanding.length;
+  const lines = useMemo(
+    () =>
+      shown === undefined
+        ? NO_GATE_LINES
+        : gateLines(shown, {
+            decisionsPending,
+            openItems: openItems.length,
+            files: fileCount,
+            outstanding: outstandingCount,
+          }),
+    [shown, decisionsPending, openItems.length, fileCount, outstandingCount],
+  );
+  const answers = draft.draft.decisions;
+  const renderItem = useCallback(
+    (item: BoardItem, column: BoardColumn) =>
+      taskState === null
+        ? null
+        : renderBoardItem(item, column, {
+            state: taskState,
+            fresh: (key) => key === latestKey && isRunning,
+            answerable: isRunning,
+            answers,
+            confirming: taskState === "review" && deleted === null,
+            gateDecisionIds,
+            gate: lines,
+            open: (key) => setOpened({ type: "item", key }),
+          }),
+    [taskState, latestKey, isRunning, answers, deleted, gateDecisionIds, lines],
+  );
+  const openStep = useCallback((id: string) => setOpened({ type: "step", id }), []);
+  const { mutate: forceStepReviewMutate } = forceReview;
+  const forceStepReview = useCallback(
+    (stepId: string, force: boolean) => forceStepReviewMutate({ taskId, stepId, force }),
+    [forceStepReviewMutate, taskId],
   );
 
   if (task.isLoading) {
@@ -1327,15 +1487,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     setTabPick({ tab: next, state: t.state });
     setUrlTab(next);
   };
-  /**
-   * The gate's footer — Approve, Retry, Launch, Open review — said once on the page: in the gate
-   * dialog, which the gate card on the board and the strip under the brief and the change both
-   * open. One copy, so there is one control of each name on the page and one remark box bound to
-   * the draft. It never points at a question the harness is stopped on (`waiting`): that question
-   * is a card on the board, answered from its own dialog.
-   */
-  const gateShown =
-    deleted === null && (t.state !== "running" || canOpenReview(t) || t.completedAt !== null);
   const renderFooter = () =>
     deleted !== null ? null : (
       <TaskFooter
@@ -1403,15 +1554,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       />
     );
 
-  const columns = boardColumns({
-    stepped: scope.stepped,
-    state: t.state,
-    home: scope.selected,
-    facts,
-    rows,
-    showGate: gateShown,
-    history: stepHistory,
-  });
   const tally = boardTally(columns);
   const everyItem = columns.flatMap((column) => column.items);
   const openAsks = everyItem.filter((item) => needsYou(item, t.state));
@@ -1419,21 +1561,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * What Follow live pans to: the newest thing waiting on a person, else the newest card under
    * the Step the run is on. A todo ticking is not news; a question arriving is.
    */
-  const currentColumn = columns.find((column) => column.current);
-  const latestKey = openAsks.at(-1)?.key ?? currentColumn?.items.at(-1)?.key ?? null;
   const gateItem = everyItem.find((item) => item.kind === "gate");
   // The Step an approval hands on to — what "Approve" says it will do. Null on the last Step, and
   // on a Task with no Workflow, where approving finishes the Task.
   const gateAt = columns.findIndex((c) => c.items.some((i) => i.kind === "gate"));
   const nextStepName = scope.stepped.length > 0 ? (columns[gateAt + 1]?.name ?? null) : null;
   const gateColumn = columns.find((column) => column.items.some((item) => item.kind === "gate"));
-  const lines = gateLines(t, {
-    decisionsPending,
-    openItems: openItems.length,
-    files: fileCount,
-    outstanding: dependencies.outstanding.length,
-  });
-
   /**
    * Approve pressed with decisions still unsettled: rather than a greyed button and a sentence
    * about somewhere else, the dialog of the Step's decisions opens in place of the gate's, with
@@ -1773,17 +1906,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // `taskActionMessage` owns the whole mapping, the same one the board's banner reads through.
   const moveMessage = taskActionMessage(move.error?.message ?? launch.error?.message);
 
-  const submitInput = () => {
-    const text = input.trim();
-    if (!text || !isRunning) return;
+  /** Whether the steer was taken — sent, or held for the stream — so the composer can clear. */
+  const submitInput = (raw: string): boolean => {
+    const text = raw.trim();
+    if (!text || !isRunning) return false;
     setAck(null);
     // Straight through when there is a stream to send on; held for it otherwise.
-    if (canSteer && live.sendInput(text)) {
-      setInput("");
-      return;
-    }
+    if (canSteer && live.sendInput(text)) return true;
     setQueued(text);
-    setInput("");
+    return true;
   };
 
   return (
@@ -2181,26 +2312,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     state={t.state}
                     live={isRunning && live.status === "open"}
                     latestKey={latestKey}
-                    onOpenStep={(id) => setOpened({ type: "step", id })}
+                    onOpenStep={openStep}
                     forcedReview={forcedReview}
                     {...(scope.binding && deleted === null
-                      ? {
-                          onForceReview: (stepId: string, force: boolean) =>
-                            forceReview.mutate({ taskId, stepId, force }),
-                        }
+                      ? { onForceReview: forceStepReview }
                       : {})}
-                    renderItem={(item, column) =>
-                      renderBoardItem(item, column, {
-                        state: t.state,
-                        fresh: (key) => key === latestKey && isRunning,
-                        answerable: isRunning,
-                        answers: draft.draft.decisions,
-                        confirming: t.state === "review" && deleted === null,
-                        gateDecisionIds,
-                        gate: lines,
-                        open: (key) => setOpened({ type: "item", key }),
-                      })
-                    }
+                    renderItem={renderItem}
                   />
                 </div>
                 {/*
@@ -2209,10 +2326,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   process and cannot.
                 */}
                 {isRunning || queued !== null || stopQueued ? (
-                  <HarnessComposer
-                    value={input}
-                    onChange={setInput}
-                    onSubmit={submitInput}
+                  <SteerComposer
+                    onSend={submitInput}
                     onStop={() => {
                       setAck(null);
                       live.stopHarness();
@@ -2286,14 +2401,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     // still Running, is read, not reviewed.
                     {...(t.state === "review" &&
                     (shownRound === null || shownRound.index === latestRound)
-                      ? {
-                          ticks: {
-                            viewed: draft.viewed,
-                            onToggle: draft.toggleViewed,
-                            notes: draft.draft.notes,
-                            ...noteEdits,
-                          },
-                        }
+                      ? { ticks }
                       : {})}
                   />
                 </ReadingPanel>

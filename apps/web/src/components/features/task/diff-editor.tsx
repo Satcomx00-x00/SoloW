@@ -1,7 +1,7 @@
 "use client";
 
 import { Columns2, MessageSquarePlus, Rows3 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { type LineAnchor, type ReviewNotes, ReviewNoteThread } from "./review-notes";
@@ -247,7 +247,14 @@ function InlineRows({ lines, notes, composing, onCompose }: RowsProps) {
   );
 }
 
-export function DiffEditor({
+/**
+ * `content-visibility` per hunk: the whole-patch view draws every line of every file, and a hunk
+ * scrolled out of the box was laid out and painted for nothing. Per hunk, not per row — a row is
+ * too short for the skipped work to repay the bookkeeping.
+ */
+const HUNK_CLASS = "[contain-intrinsic-size:auto_20rem] [content-visibility:auto]";
+
+export const DiffEditor = memo(function DiffEditor({
   patch,
   path,
   mode,
@@ -313,7 +320,7 @@ export function DiffEditor({
             // shows several files, and five new one-line files all begin `@@ -0,0 +1 @@`. The
             // position disambiguates; the list is never reordered or spliced.
             // biome-ignore lint/suspicious/noArrayIndexKey: see above
-            <div key={`${index}:${hunk.oldStart}:${hunk.newStart}`}>
+            <div key={`${index}:${hunk.oldStart}:${hunk.newStart}`} className={HUNK_CLASS}>
               {index > 0 || hunk.heading ? <HunkSeparator heading={hunk.heading} /> : null}
               {mode === "split" ? (
                 <SplitRows
@@ -343,4 +350,4 @@ export function DiffEditor({
       )}
     </section>
   );
-}
+});

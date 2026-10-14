@@ -991,6 +991,17 @@ describe("TaskWorkspace terminal pane", () => {
     fireEvent.keyDown(edge, { key: "ArrowLeft" });
     expect(Number(edge.getAttribute("aria-valuenow"))).toBe(before + 20);
 
+    // A drag paints the pane as it goes and remembers the width once, on release — not a page
+    // render and a storage write per pointer event.
+    const stored = () => window.localStorage.getItem("solow.task.terminalWidth");
+    fireEvent.pointerDown(edge, { clientX: 500 });
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 460 }));
+    expect(pane.style.getPropertyValue("--terminal-width")).toBe(`${before + 60}px`);
+    expect(stored()).toBe(String(before + 20));
+    window.dispatchEvent(new PointerEvent("pointerup"));
+    await waitFor(() => expect(stored()).toBe(String(before + 60)));
+    expect(Number(edge.getAttribute("aria-valuenow"))).toBe(before + 60);
+
     fireEvent.click(within(pane).getByRole("button", { name: "Close terminal" }));
     expect(screen.queryByRole("region", { name: "Terminal" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Terminal" }));
