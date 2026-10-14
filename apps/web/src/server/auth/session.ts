@@ -1,6 +1,6 @@
 import "server-only";
 import { createDb, type Db } from "@solow/db";
-import { createAuth, workspaceForUser } from "./auth.js";
+import { auth, workspaceForUser } from "./auth.js";
 
 /**
  * Session resolution (task TASK-011). Returns the authenticated Owner's identity and their
@@ -42,10 +42,18 @@ export interface SessionDeps {
   ) => Promise<{ user: { id: string; name?: string | null; email?: string | null } } | null>;
 }
 
+/**
+ * The process's one auth instance, not a new one per check.
+ *
+ * `createAuth` is not a cheap constructor: `betterAuth()` builds every endpoint object, the
+ * Drizzle adapter, the internal adapter, its cookie and table setup and each plugin — and this
+ * runs on every tRPC request (through `createContext`) and every signed-in page render. `auth()`
+ * is the same instance the route handler serves, built once over the same cached connection
+ * `createDb()` returns here.
+ */
 function defaultDeps(): SessionDeps {
-  const db = createDb();
-  const instance = createAuth(db);
-  return { db, getSession: (headers) => instance.api.getSession({ headers }) };
+  const instance = auth();
+  return { db: createDb(), getSession: (headers) => instance.api.getSession({ headers }) };
 }
 
 export async function resolveSession(
