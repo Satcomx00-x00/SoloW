@@ -69,6 +69,9 @@ export interface OrchestratorClient {
    * the browser that made it — every other open board sat stale until someone reloaded. Fire and
    * forget, and deliberately never fatal: the write already succeeded, and a failed notification
    * must not turn a completed action into an error. The worst case is the old behaviour.
+   *
+   * Never rejects, which is what lets callers `void` it rather than await it: the response to
+   * the move does not wait on a hub that is slow, and its `fetch` has no timeout of its own.
    */
   announceTask(input: { workspaceId: string; taskId: string; state: TaskState }): Promise<void>;
   /**
@@ -212,11 +215,13 @@ export const orchestrator: OrchestratorClient = {
   },
 
   async announceTask(input) {
-    const base = orchestratorUrl();
-    // Silent where there is no hub to tell: a dev run without an orchestrator is not a broken
-    // deployment, and logging a line per state change would drown the console it shares.
-    if (!base) return;
     try {
+      // Inside the `try`: a malformed SOLOW_ORCHESTRATOR_URL throws from the parse, and nothing
+      // awaits this to catch it.
+      const base = orchestratorUrl();
+      // Silent where there is no hub to tell: a dev run without an orchestrator is not a broken
+      // deployment, and logging a line per state change would drown the console it shares.
+      if (!base) return;
       const ticket = signStreamTicket(
         { workspaceId: input.workspaceId, taskId: input.taskId },
         webEnv().SOLOW_STREAM_SECRET,

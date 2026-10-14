@@ -119,8 +119,13 @@ export async function requireUnblocked(rctx: RequestContext, taskId: string): Pr
  * Workspace at its limit could be pushed past it by retrying rather than launching — the cap held
  * on the path people used least.
  */
-export async function startTaskRun(rctx: RequestContext, taskId: string): Promise<TaskDto> {
-  const existing = unwrap(await getTaskById(rctx, taskId));
+export async function startTaskRun(
+  rctx: RequestContext,
+  taskId: string,
+  /** The row as the caller just read it, so `launch` and `move` do not read it twice. */
+  read?: TaskDto,
+): Promise<TaskDto> {
+  const existing = read ?? unwrap(await getTaskById(rctx, taskId));
   // A Task at its gate is moved on by its decision (`review.decide`), never by a second start: a
   // launch from there ran a fresh harness beside the decision the gate was waiting for, and the
   // pair of them wrote the same Step's cursor in turn.
@@ -158,7 +163,7 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
     }
     throw cause;
   }
-  await orchestrator.announceTask({
+  void orchestrator.announceTask({
     workspaceId: rctx.workspaceId,
     taskId: existing.id,
     state: updated.state,
@@ -404,7 +409,7 @@ export const taskRouter = router({
       }
       await requireUnblocked(ctx.rctx, task.id);
       // The concurrency cap is taken with the row, in `startTaskRun`.
-      return startTaskRun(ctx.rctx, task.id);
+      return startTaskRun(ctx.rctx, task.id, task);
     }),
 
   quickStart: ownerProcedure
@@ -513,10 +518,10 @@ export const taskRouter = router({
       // Moving into `running` *is* starting, and now does it: same Session, same concurrency cap,
       // same publish to the durable engine as Launch and Retry. It used to write the column and
       // nothing else, which left a card in Running with no harness behind it and no way to tell.
-      if (input.to === "running") return startTaskRun(ctx.rctx, task.id);
+      if (input.to === "running") return startTaskRun(ctx.rctx, task.id, task);
       const moved = unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
       // Every client watching, not just the one that dragged the card.
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: moved.id,
         state: moved.state,
@@ -552,7 +557,7 @@ export const taskRouter = router({
       }
       unwrap(canTransitionTask(task.state, "review"));
       const opened = unwrap(await updateTaskState(ctx.rctx, task.id, "review"));
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: opened.id,
         state: opened.state,
@@ -575,7 +580,7 @@ export const taskRouter = router({
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
       const restored = unwrap(await restoreTask(ctx.rctx, input.id));
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: restored.id,
         state: restored.state,
@@ -640,7 +645,7 @@ export const taskRouter = router({
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
       const kept = unwrap(await keepUndeliveredLocal(ctx.rctx, input.id));
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: kept.id,
         state: kept.state,

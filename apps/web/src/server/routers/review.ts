@@ -124,7 +124,7 @@ export const reviewRouter = router({
         throw cause;
       }
 
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: session.taskId,
         state: "running",
