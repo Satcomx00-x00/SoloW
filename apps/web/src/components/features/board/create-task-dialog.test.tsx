@@ -106,11 +106,33 @@ describe("CreateTaskDialog — Issue picker filtered by Repository", () => {
     );
   });
 
+  it("reads nothing while it is closed, and everything it needs once it opens", async () => {
+    // The board and the Issue page keep this dialog mounted on every visit.
+    const { log } = renderWithTrpc(<CreateTaskDialog />, handlers);
+    const trigger = await screen.findByRole("button", { name: "New task" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(log.calls).toEqual([]);
+
+    fireEvent.click(trigger);
+    await waitFor(() =>
+      expect(new Set(log.calls.map((c) => c.path))).toEqual(
+        new Set([
+          "issue.list",
+          "profile.agent.list",
+          "profile.executor.list",
+          "repository.list",
+          "preference.getTaskDefaults",
+        ]),
+      ),
+    );
+  });
+
   it("labels the Issue picker's placeholder to say a Repository comes first", async () => {
     renderWithTrpc(<CreateTaskDialog />, handlers);
     fireEvent.click(await screen.findByRole("button", { name: "New task" }));
 
-    expect(screen.getByText("Select a repository first")).toBeDefined();
+    // Found, not got: the form's reads go out when it opens, and it says it is loading until then.
+    expect(await screen.findByText("Select a repository first")).toBeDefined();
   });
 });
 
