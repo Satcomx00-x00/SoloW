@@ -3,7 +3,7 @@
 import type { IssueDto } from "@solow/contracts";
 import { Check, Loader2, Lock, Pencil, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { HarnessMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/lazy-markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { describeError } from "@/lib/errors";

@@ -133,13 +133,14 @@ const showPreview = () =>
   fireEvent.mouseDown(screen.getByRole("tab", { name: "Preview" }), { button: 0 });
 
 describe("MarkdownField preview", () => {
-  it("renders the markdown rather than showing its source", () => {
+  it("renders the markdown rather than showing its source", async () => {
     render(<Harness initial="# Heading" />);
 
     showPreview();
 
-    // Rendered as a heading element — the point of previewing at all.
-    expect(screen.getByRole("heading", { name: "Heading" })).toBeDefined();
+    // Rendered as a heading element — the point of previewing at all. Found rather than got: the
+    // renderer is loaded on first use (`lazy-markdown.tsx`).
+    expect(await screen.findByRole("heading", { name: "Heading" })).toBeDefined();
   });
 
   it("says so when there is nothing to preview, rather than showing an empty box", () => {

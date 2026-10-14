@@ -4,11 +4,12 @@ import { CommonErrorCode, type TaskDependencyDto } from "@solow/contracts";
 import { ArrowLeft, ExternalLink, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CreateTaskDialog, type TaskPreset } from "@/components/features/board/create-task-dialog";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
+import { preloadHarnessMarkdown } from "@/components/features/task/lazy-markdown";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,9 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const issue = trpc.issue.get.useQuery({ id: issueId });
+  // The description is drawn as markdown the moment the read lands; fetch the renderer alongside
+  // it, not after it.
+  useEffect(() => preloadHarnessMarkdown(), []);
   // Back goes to the Project this Issue belongs to — the route is flat, so the destination has
   // to be asked for rather than read off the address.
   const back = useBackToProject(issueId, "/issues");

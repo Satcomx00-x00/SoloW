@@ -3,7 +3,7 @@
 import type { IssueCommentDto } from "@solow/contracts";
 import { Loader2, MessageSquare, Send } from "lucide-react";
 import { useState } from "react";
-import { HarnessMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/lazy-markdown";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

@@ -1,7 +1,7 @@
 "use client";
 
 import { isValidElement, memo, type ReactNode } from "react";
-import Markdown, { type Components } from "react-markdown";
+import Markdown, { type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -207,23 +207,29 @@ const components: Components = {
   ),
 };
 
+/* Hoisted, so a render hands `react-markdown` the same plugin lists instead of fresh ones. */
+const REMARK_PLUGINS = [remarkGfm];
+/*
+ * `rehype-highlight` tokenises the text of a fenced block into spans. It never introduces
+ * markup from the source — it only wraps text nodes it produced itself — so it does not
+ * widen the "no raw HTML" rule above; `rehype-raw` is still absent and still must be.
+ *
+ * `detect` is on so a fence with no language still gets coloured, and `ignoreMissing` so
+ * a fence naming a language this build did not register renders as plain text in the box
+ * rather than throwing inside the parser and taking the whole turn's render with it.
+ */
+const REHYPE_PLUGINS: NonNullable<Options["rehypePlugins"]> = [
+  [rehypeHighlight, { detect: true, ignoreMissing: true }],
+];
+
 export const HarnessMarkdown = memo(function HarnessMarkdown({ text }: { text: string }) {
   return (
     <div className="min-w-0 space-y-3 break-words text-sm leading-[1.75]">
       {/* `urlTransform` is left at its default on purpose: it strips dangerous URLs before the
           `a` component ever sees one, so the allowlist above is the second lock, not the only. */}
       <Markdown
-        remarkPlugins={[remarkGfm]}
-        /*
-         * `rehype-highlight` tokenises the text of a fenced block into spans. It never introduces
-         * markup from the source — it only wraps text nodes it produced itself — so it does not
-         * widen the "no raw HTML" rule above; `rehype-raw` is still absent and still must be.
-         *
-         * `detect` is on so a fence with no language still gets coloured, and `ignoreMissing` so
-         * a fence naming a language this build did not register renders as plain text in the box
-         * rather than throwing inside the parser and taking the whole turn's render with it.
-         */
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={components}
       >
         {text}

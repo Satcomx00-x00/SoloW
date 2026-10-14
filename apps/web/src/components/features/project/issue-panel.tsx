@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DeleteIssueAction } from "@/components/features/issues/delete-issue-action";
-import { HarnessMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown, preloadHarnessMarkdown } from "@/components/features/task/lazy-markdown";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,6 +123,10 @@ export function IssuePanel({
     { issueId: issueId ?? "" },
     { enabled: issueId !== null },
   );
+  // Opening the panel means a description to draw; fetch its renderer with the read.
+  useEffect(() => {
+    if (issueId !== null) preloadHarnessMarkdown();
+  }, [issueId]);
   const update = trpc.issue.updateExternal.useMutation({
     onSuccess: () => {
       // The row on the table behind carries the same title and state.

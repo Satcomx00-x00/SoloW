@@ -33,7 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { effectiveGate, GATE_DESCRIPTION, GATE_NAME } from "@/lib/workflow-gates";
 import { trpc } from "@/trpc/react";
-import { HarnessMarkdown } from "./markdown";
+import { HarnessMarkdown } from "./lazy-markdown";
 import { PermissionCard } from "./permission-card";
 import type { BoardColumn } from "./task-board-model";
 import { type DecisionAnswer, DecisionMark, questionText } from "./task-board-nodes";
