@@ -7,9 +7,7 @@ import type {
   ProjectDto,
 } from "@solow/contracts";
 import { ChevronDown, Download, Milestone, Plus, SquarePen } from "lucide-react";
-import { useState } from "react";
-import { ImportIssuesDialog } from "@/components/features/issues/import-issues-dialog";
-import { IssueFormDialog } from "@/components/features/issues/issue-form-dialog";
+import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,8 +19,34 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
-import { CreateIssueDialog } from "./create-issue-dialog";
-import { CreateParentItemDialog } from "./create-parent-item-dialog";
+
+/*
+ * The four dialogs behind this menu, loaded on first use rather than with the project page. They
+ * are mounted only while open (below), and the issue form alone is over a thousand lines of
+ * pickers the table never draws — all downloaded and parsed on every visit to a project for a
+ * menu most visits never open. Opening the menu starts the fetch, so by the time an entry is
+ * picked the dialog is usually already here.
+ */
+const loadCreateIssue = () => import("./create-issue-dialog");
+const loadParentItem = () => import("./create-parent-item-dialog");
+const loadIssueForm = () => import("@/components/features/issues/issue-form-dialog");
+const loadImport = () => import("@/components/features/issues/import-issues-dialog");
+const CreateIssueDialog = lazy(() =>
+  loadCreateIssue().then((m) => ({ default: m.CreateIssueDialog })),
+);
+const CreateParentItemDialog = lazy(() =>
+  loadParentItem().then((m) => ({ default: m.CreateParentItemDialog })),
+);
+const IssueFormDialog = lazy(() => loadIssueForm().then((m) => ({ default: m.IssueFormDialog })));
+const ImportIssuesDialog = lazy(() =>
+  loadImport().then((m) => ({ default: m.ImportIssuesDialog })),
+);
+const preloadDialogs = () => {
+  void loadCreateIssue();
+  void loadParentItem();
+  void loadIssueForm();
+  void loadImport();
+};
 
 /**
  * The `＋ New` split-button (spec F23a Part 1), top-right of the Project toolbar.
@@ -202,7 +226,7 @@ export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => open && preloadDialogs()}>
         <DropdownMenuTrigger asChild>
           <Button size="xs" className="gap-1">
             <Plus aria-hidden /> New
@@ -250,34 +274,40 @@ export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
       {/* Mounted only while open, so each dialog starts from empty form state every time — the
           same reason every other create surface in the app keys its dialogs on open, rather than
           rendering them always and reaching for a reset path. */}
-      {dialog === "issue" && (
-        <CreateIssueDialog
-          projectId={project.id}
-          /* The `epics` flag alone, not this menu's gate: the picker asks whether there are epics
+      <Suspense fallback={null}>
+        {dialog === "issue" && (
+          <CreateIssueDialog
+            projectId={project.id}
+            /* The `epics` flag alone, not this menu's gate: the picker asks whether there are epics
              to nest an Issue under, which is a different question from whether one can be made. */
-          epicsSupported={parentState.epicsSupported}
-          open
-          onOpenChange={(next) => !next && setDialog(null)}
-          onCreated={onCreated}
-        />
-      )}
-      {dialog === "local" && (
-        <IssueFormDialog open onOpenChange={(next) => !next && setDialog(null)} />
-      )}
-      {dialog === "import" && (
-        <ImportIssuesDialog trigger={null} open onOpenChange={(next) => !next && setDialog(null)} />
-      )}
-      {dialog === "parent" && parentState.integrationId && parentState.container && (
-        <CreateParentItemDialog
-          projectId={project.id}
-          integrationId={parentState.integrationId}
-          container={parentState.container}
-          noun={parentState.noun ?? "parent item"}
-          open
-          onOpenChange={(next) => !next && setDialog(null)}
-          onCreated={onCreated}
-        />
-      )}
+            epicsSupported={parentState.epicsSupported}
+            open
+            onOpenChange={(next) => !next && setDialog(null)}
+            onCreated={onCreated}
+          />
+        )}
+        {dialog === "local" && (
+          <IssueFormDialog open onOpenChange={(next) => !next && setDialog(null)} />
+        )}
+        {dialog === "import" && (
+          <ImportIssuesDialog
+            trigger={null}
+            open
+            onOpenChange={(next) => !next && setDialog(null)}
+          />
+        )}
+        {dialog === "parent" && parentState.integrationId && parentState.container && (
+          <CreateParentItemDialog
+            projectId={project.id}
+            integrationId={parentState.integrationId}
+            container={parentState.container}
+            noun={parentState.noun ?? "parent item"}
+            open
+            onOpenChange={(next) => !next && setDialog(null)}
+            onCreated={onCreated}
+          />
+        )}
+      </Suspense>
     </>
   );
 }
