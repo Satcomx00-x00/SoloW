@@ -174,8 +174,22 @@ function describe(procedurePath: string, type: string, meta: ProcedureDef["_def"
   return written ?? `${verb} operation \`${procedurePath}\` on SoloW.`;
 }
 
+/**
+ * Built once per process. `appRouter` and the exposure lists are fixed at import, so the answer
+ * never changes — and building it is not free: one zod-to-JSON-Schema conversion per exposed
+ * procedure, then a sort. It used to run on every `tools/list`, and on every `tools/call` just to
+ * find the one tool asked for.
+ */
+let tools: readonly McpToolDefinition[] | undefined;
+let toolsByName: ReadonlyMap<string, McpToolDefinition> | undefined;
+
 /** Every procedure the MCP surface exposes, in stable path order. */
-export function listMcpTools(): McpToolDefinition[] {
+export function listMcpTools(): readonly McpToolDefinition[] {
+  tools ??= buildMcpTools();
+  return tools;
+}
+
+function buildMcpTools(): McpToolDefinition[] {
   const procedures = (
     appRouter as unknown as { _def: { procedures: Record<string, ProcedureDef> } }
   )._def.procedures;
@@ -195,5 +209,6 @@ export function listMcpTools(): McpToolDefinition[] {
 
 /** Look up one tool by its MCP name; undefined when the client asked for something withheld. */
 export function findMcpTool(name: string): McpToolDefinition | undefined {
-  return listMcpTools().find((tool) => tool.name === name);
+  toolsByName ??= new Map(listMcpTools().map((tool) => [tool.name, tool]));
+  return toolsByName.get(name);
 }

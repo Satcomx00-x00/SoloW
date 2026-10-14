@@ -60,6 +60,11 @@ function sseFrom(payload: unknown): Response {
  */
 export interface McpHandlerDeps {
   db: Db;
+  /**
+   * Run bookkeeping once the response is on its way — the route hands in Next's `after`. Absent
+   * (the tests, any caller outside a Next request), the work is awaited in line, as it was.
+   */
+  defer?: (work: () => Promise<unknown>) => void;
 }
 
 /**
@@ -97,8 +102,12 @@ export async function handleMcpRequest(
     );
   }
 
-  // Best-effort, and awaited so a serverless invocation cannot be frozen before it lands.
-  await stampTokenUsed(db, principal.tokenId).catch(() => {});
+  // Best-effort, and never frozen before it lands: `after` keeps the invocation alive until it
+  // has run. Deferred rather than awaited because the driver is synchronous — a write waiting on
+  // an orchestrator's lock (`busy_timeout`) held up every MCP call behind a "last used" stamp.
+  const stamp = () => stampTokenUsed(db, principal.tokenId).catch(() => {});
+  if (deps.defer) deps.defer(stamp);
+  else await stamp();
 
   const dispatchDeps = { ctx: principal.ctx, scope: principal.scope };
   const batch = Array.isArray(payload) ? payload : [payload];

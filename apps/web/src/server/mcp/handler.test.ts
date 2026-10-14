@@ -366,6 +366,22 @@ describe("MCP transport — token usage tracking", () => {
     const [row] = await db.select().from(mcpToken).where(eqId(tokenId));
     expect(row?.lastUsedAt).not.toBeNull();
   });
+
+  it("answers before the stamp when given somewhere to defer it, and the stamp still lands", async () => {
+    const { value, tokenId } = await seedWorkspaceWithToken("acme");
+    const deferred: (() => Promise<unknown>)[] = [];
+    const res = await handleMcpRequest(rpc({ jsonrpc: "2.0", id: 1, method: "ping" }, value), {
+      db,
+      defer: (work) => deferred.push(work),
+    });
+    expect(res.status).toBe(200);
+    const read = async () => (await db.select().from(mcpToken).where(eqId(tokenId)))[0];
+    expect((await read())?.lastUsedAt).toBeNull();
+
+    expect(deferred).toHaveLength(1);
+    await deferred[0]?.();
+    expect((await read())?.lastUsedAt).not.toBeNull();
+  });
 });
 
 /** Local helper so the test file does not need drizzle's operators imported for one use. */

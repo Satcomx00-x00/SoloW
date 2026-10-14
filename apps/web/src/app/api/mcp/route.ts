@@ -1,3 +1,5 @@
+import { createDb } from "@solow/db";
+import { after } from "next/server";
 import { handleMcpRequest } from "@/server/mcp/handler";
 
 /**
@@ -8,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function handler(req: Request): Promise<Response> {
-  return handleMcpRequest(req);
+  return handleMcpRequest(req, { db: createDb(), defer: after });
 }
 
 export { handler as DELETE, handler as GET, handler as POST };
