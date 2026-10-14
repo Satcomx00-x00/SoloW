@@ -206,10 +206,11 @@ async function autoImportIssuesForRepository(
   const external = await driver.data.listIssues(credential, repo.externalFullName);
   if (external.length === 0) return 0;
 
-  const imported = await importIssues(ctx, {
-    repositoryId: repo.id,
-    externalIds: external.map((i) => i.externalId),
-  });
+  const imported = await importIssues(
+    ctx,
+    { repositoryId: repo.id, externalIds: external.map((i) => i.externalId) },
+    external,
+  );
   if (!imported.ok) {
     throw new Error(`auto-import of issues for ${repo.externalFullName} failed: ${imported.error}`);
   }
@@ -646,9 +647,16 @@ export async function mirrorExternalIssues(
  * `iid` restarts per project, so two Repositories sharing an Integration can otherwise collide
  * on the same externalId for two genuinely different issues (adversarial review, pre-merge).
  */
+/**
+ * `listed` is the repository's listing when the caller has just fetched it. The auto-imports
+ * list a repository only to learn which ids to import, and then this listed it again — every
+ * issue listing paid for twice, up to `ISSUE_PAGE_CAP` pages and the per-issue enrichment behind
+ * each, on connect and on adopt. The credential and repository checks still run either way.
+ */
 export async function importIssues(
   ctx: RequestContext,
   input: ImportIssuesInput,
+  listed?: readonly ExternalIssue[],
 ): Promise<Result<IssueDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
   const repo = await loadLinkedRepository(ctx, input.repositoryId);
   if (!repo.ok) return repo;
@@ -658,7 +666,8 @@ export async function importIssues(
 
   const driver = driverWith(cred.data.row.provider, "issues");
   if (!driver.ok) return err(driver.error);
-  const external = await driver.data.listIssues(cred.data.credential, repo.data.externalFullName);
+  const external =
+    listed ?? (await driver.data.listIssues(cred.data.credential, repo.data.externalFullName));
   const selected = new Set(input.externalIds);
   const toImport = external.filter((i) => selected.has(i.externalId));
   const syncedAt = new Date().toISOString();
@@ -716,56 +725,60 @@ export async function syncRepositorySignals(
   ]);
   const syncedAt = new Date().toISOString();
 
-  for (const cr of externalCrs) {
-    await ctx.db
-      .insert(changeRequest)
-      .values({
-        workspaceId: ctx.workspaceId,
-        repositoryId: repo.data.id,
-        integrationId: repo.data.integrationId,
-        externalId: cr.externalId,
-        number: cr.number,
-        title: cr.title,
-        state: cr.state,
-        url: cr.url,
-        headRef: cr.headRef,
-        baseRef: cr.baseRef,
-        authorLogin: cr.authorLogin,
-        syncedAt,
-      })
-      // Scoped to (repositoryId, externalId), matching the schema's unique index: GitLab's
-      // merge-request `iid` restarts per project, so keying on integrationId alone would let
-      // one Repository's sync overwrite a different Repository's change request that happens
-      // to share the same iid (adversarial review, pre-merge).
-      .onConflictDoUpdate({
-        target: [changeRequest.repositoryId, changeRequest.externalId],
-        set: { title: cr.title, state: cr.state, syncedAt, updatedAt: syncedAt },
-      });
-  }
+  // One transaction for both lists rather than a commit per row: `bun:sqlite` is synchronous, so
+  // each autocommit held the event loop for its own commit (see `refreshProject`'s page write).
+  ctx.db.transaction((tx) => {
+    for (const cr of externalCrs) {
+      tx.insert(changeRequest)
+        .values({
+          workspaceId: ctx.workspaceId,
+          repositoryId: repo.data.id,
+          integrationId: repo.data.integrationId,
+          externalId: cr.externalId,
+          number: cr.number,
+          title: cr.title,
+          state: cr.state,
+          url: cr.url,
+          headRef: cr.headRef,
+          baseRef: cr.baseRef,
+          authorLogin: cr.authorLogin,
+          syncedAt,
+        })
+        // Scoped to (repositoryId, externalId), matching the schema's unique index: GitLab's
+        // merge-request `iid` restarts per project, so keying on integrationId alone would let
+        // one Repository's sync overwrite a different Repository's change request that happens
+        // to share the same iid (adversarial review, pre-merge).
+        .onConflictDoUpdate({
+          target: [changeRequest.repositoryId, changeRequest.externalId],
+          set: { title: cr.title, state: cr.state, syncedAt, updatedAt: syncedAt },
+        })
+        .run();
+    }
 
-  for (const b of externalBranches) {
-    await ctx.db
-      .insert(repositoryBranch)
-      .values({
-        workspaceId: ctx.workspaceId,
-        repositoryId: repo.data.id,
-        name: b.name,
-        isDefault: b.isDefault,
-        headSha: b.headSha,
-        headCommittedAt: b.headCommittedAt,
-        syncedAt,
-      })
-      .onConflictDoUpdate({
-        target: [repositoryBranch.repositoryId, repositoryBranch.name],
-        set: {
+    for (const b of externalBranches) {
+      tx.insert(repositoryBranch)
+        .values({
+          workspaceId: ctx.workspaceId,
+          repositoryId: repo.data.id,
+          name: b.name,
           isDefault: b.isDefault,
           headSha: b.headSha,
           headCommittedAt: b.headCommittedAt,
           syncedAt,
-          updatedAt: syncedAt,
-        },
-      });
-  }
+        })
+        .onConflictDoUpdate({
+          target: [repositoryBranch.repositoryId, repositoryBranch.name],
+          set: {
+            isDefault: b.isDefault,
+            headSha: b.headSha,
+            headCommittedAt: b.headCommittedAt,
+            syncedAt,
+            updatedAt: syncedAt,
+          },
+        })
+        .run();
+    }
+  });
 
   const [changeRequests, branches] = await Promise.all([
     ctx.db.select().from(changeRequest).where(eq(changeRequest.repositoryId, repo.data.id)),

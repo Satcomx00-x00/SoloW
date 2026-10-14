@@ -283,10 +283,11 @@ export async function importIntegrationIssues(
         repo.externalFullName,
       );
       if (external.length === 0) continue;
-      const result = await importIssues(ctx, {
-        repositoryId: repo.id,
-        externalIds: external.map((i) => i.externalId),
-      });
+      const result = await importIssues(
+        ctx,
+        { repositoryId: repo.id, externalIds: external.map((i) => i.externalId) },
+        external,
+      );
       if (result.ok) imported += result.data.length;
       touched += 1;
     } catch {}
@@ -584,53 +585,65 @@ export async function refreshProject(
 
   let written = 0;
   let skipped = 0;
-  for (const item of page.items) {
-    const repositoryId = item.issue
-      ? repositoryIdByName.get(item.issue.repositoryFullName.toLowerCase())
-      : undefined;
-    const issueId = repositoryId
-      ? issueIdByKey.get(issueKey(repositoryId, item.issueExternalId))
-      : issueIdByExternal.get(item.issueExternalId);
-    if (!issueId) {
-      skipped += 1;
-      continue;
-    }
-    const [saved] = await ctx.db
-      .insert(projectItem)
-      .values({
-        workspaceId: ctx.workspaceId,
-        projectId,
-        issueId,
-        providerItemId: item.externalId,
-        position: item.position,
-        archivedAt: item.archivedAt,
-      })
-      .onConflictDoUpdate({
-        target: [projectItem.projectId, projectItem.providerItemId],
-        set: {
+  /*
+   * One transaction for the page, not one commit per statement. A 100-item page is around nine
+   * hundred upserts, a walk can be two hundred pages, and `bun:sqlite` is synchronous — every
+   * autocommit blocked the web process's event loop for its own commit. It also makes a page
+   * land whole or not at all, which is what the cursor written after it already assumes.
+   *
+   * Synchronous inside, as drizzle's SQLite transactions must be: `.get()`/`.run()` rather than
+   * `await`.
+   */
+  ctx.db.transaction((tx) => {
+    for (const item of page.items) {
+      const repositoryId = item.issue
+        ? repositoryIdByName.get(item.issue.repositoryFullName.toLowerCase())
+        : undefined;
+      const issueId = repositoryId
+        ? issueIdByKey.get(issueKey(repositoryId, item.issueExternalId))
+        : issueIdByExternal.get(item.issueExternalId);
+      if (!issueId) {
+        skipped += 1;
+        continue;
+      }
+      const saved = tx
+        .insert(projectItem)
+        .values({
+          workspaceId: ctx.workspaceId,
+          projectId,
           issueId,
+          providerItemId: item.externalId,
           position: item.position,
           archivedAt: item.archivedAt,
-          updatedAt: new Date().toISOString(),
-        },
-      })
-      .returning({ id: projectItem.id });
-    if (!saved) continue;
-    written += 1;
-
-    for (const value of item.values) {
-      const fieldId = fieldIdByProvider.get(value.fieldExternalId);
-      // A value for a field the project no longer reports has no column to live in.
-      if (!fieldId) continue;
-      await ctx.db
-        .insert(projectValue)
-        .values({ workspaceId: ctx.workspaceId, itemId: saved.id, fieldId, value: value.value })
+        })
         .onConflictDoUpdate({
-          target: [projectValue.itemId, projectValue.fieldId],
-          set: { value: value.value, syncedAt: new Date().toISOString() },
-        });
+          target: [projectItem.projectId, projectItem.providerItemId],
+          set: {
+            issueId,
+            position: item.position,
+            archivedAt: item.archivedAt,
+            updatedAt: new Date().toISOString(),
+          },
+        })
+        .returning({ id: projectItem.id })
+        .get();
+      if (!saved) continue;
+      written += 1;
+
+      for (const value of item.values) {
+        const fieldId = fieldIdByProvider.get(value.fieldExternalId);
+        // A value for a field the project no longer reports has no column to live in.
+        if (!fieldId) continue;
+        tx.insert(projectValue)
+          .values({ workspaceId: ctx.workspaceId, itemId: saved.id, fieldId, value: value.value })
+          .onConflictDoUpdate({
+            target: [projectValue.itemId, projectValue.fieldId],
+            set: { value: value.value, syncedAt: new Date().toISOString() },
+          })
+          .run();
+      }
     }
-  }
+  });
 
   // The cursor is the provider's, stored opaquely. Null means the walk finished, which is also
   // when `syncedAt` becomes true — a half-read project is not a project that agrees.
