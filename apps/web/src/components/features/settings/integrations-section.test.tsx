@@ -139,7 +139,7 @@ describe("IntegrationsSection — importing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("NOT_FOUND");
+      expect(screen.getByRole("alert").textContent).toContain("no longer exists");
     });
   });
 });
@@ -214,7 +214,7 @@ describe("IntegrationsSection", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("NOT_FOUND");
+      expect(screen.getByRole("alert").textContent).toContain("no longer exists");
     });
   });
 });

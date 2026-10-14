@@ -11,6 +11,7 @@ import {
 } from "./http.js";
 import {
   type ChangeProvider,
+  type ChangeRequestInput,
   type EpicSeed,
   type ExternalBranch,
   type ExternalChangeRequest,
@@ -834,6 +835,52 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
       baseRef: r.base.ref,
       authorLogin: r.user?.login ?? null,
     }));
+  }
+
+  /**
+   * Open the pull request for `input.head`, or refresh the one already open (A1).
+   *
+   * Looked up by `head=owner:branch` so only a pull request from this repository's own branch
+   * matches; a fork's branch of the same name is a different request.
+   */
+  async upsertChangeRequest(
+    credential: ScmCredential,
+    repo: RepoRef,
+    input: ChangeRequestInput,
+  ): Promise<{ changeRequest: ExternalChangeRequest; created: boolean }> {
+    const root = `${apiRoot(credential.baseUrl)}/repos/${repo}`;
+    const headers = authHeaders(credential);
+    const owner = repo.split("/")[0] ?? "";
+    const open = (await scmFetch(
+      "github",
+      `${root}/pulls?state=open&head=${encodeURIComponent(`${owner}:${input.head}`)}&per_page=1`,
+      headers,
+    )) as GithubPull[];
+    const toExternal = (r: GithubPull): ExternalChangeRequest => ({
+      externalId: String(r.id),
+      number: r.number,
+      title: r.title,
+      state: r.merged_at ? "merged" : r.state,
+      url: r.html_url,
+      headRef: r.head.ref,
+      baseRef: r.base.ref,
+      authorLogin: r.user?.login ?? null,
+    });
+    const existing = open[0];
+    // Already open: the push that preceded this is the update. Its title and description are
+    // left as they are, because by now they may be a reviewer's words rather than ours.
+    if (existing) return { changeRequest: toExternal(existing), created: false };
+    const base = input.base ?? (await this.getRepository(credential, repo))?.defaultBranch;
+    if (!base) {
+      throw new ScmProviderError("github", `could not tell which branch ${repo} merges into`);
+    }
+    const made = (await scmSend("github", `${root}/pulls`, headers, "POST", {
+      title: input.title,
+      body: input.body,
+      head: input.head,
+      base,
+    })) as GithubPull;
+    return { changeRequest: toExternal(made), created: true };
   }
 
   /**

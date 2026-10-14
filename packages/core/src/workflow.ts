@@ -411,6 +411,58 @@ export function stepExits<T extends WorkflowGraphStep>(
   return exits;
 }
 
+/** Whether finishing this Step can end the Workflow: one of its exits leads nowhere. */
+export function stepCanEndWorkflow<T extends WorkflowGraphStep>(
+  steps: readonly T[],
+  stepId: string,
+): boolean {
+  return (stepExits(steps).get(stepId) ?? []).some((exit) => exit.stepId === null);
+}
+
+/**
+ * The next Step's handoff: the harness's summary, and what the reviewer said when approving.
+ *
+ * Null when there is neither, so a Step with nothing to carry keeps carrying nothing. The
+ * reviewer's part is headed, because the Build's harness reads the handoff as prose and has to
+ * be able to tell "what the Plan said" from "what the person said about the Plan".
+ */
+export function handoffWith(
+  summary: string | null,
+  feedback: string | null | undefined,
+): string | null {
+  const said = feedback?.trim();
+  const parts = [summary?.trim() || null, said ? `Reviewer's decisions:\n${said}` : null].filter(
+    (part): part is string => part !== null,
+  );
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+/**
+ * Why the round that applied a reviewer's settled decisions sends the Step back to its gate
+ * instead of advancing, or null when nothing does.
+ *
+ * - `new-decisions`: the harness asked new decisions while applying the old ones, and those are
+ *   as unconfirmed as the first ones were.
+ * - `last-step`: this Step can end the Workflow, and ending it integrates — which happens only on
+ *   an approval of the work being integrated (Principle I), and nobody has seen this round's.
+ *
+ * A harness that gave up (`blocked`) reopens nothing here: there is nothing finished to move on
+ * from, and the caller holds the gate for that reason on its own.
+ */
+export function reopenAfterApplyingDecisions(input: {
+  askedDecisions: boolean;
+  outcome: TaskCompletionOutcome | null;
+  canEnd: boolean;
+}): "new-decisions" | "last-step" | null {
+  return input.askedDecisions
+    ? "new-decisions"
+    : input.outcome === "blocked"
+      ? null
+      : input.canEnd
+        ? "last-step"
+        : null;
+}
+
 /**
  * A shape the graph must not have (F03 FR-5).
  *

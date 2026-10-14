@@ -1,11 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { BillingErrorCode } from "@solow/contracts";
-import {
-  classifyRunFailure,
-  detectFailureSignal,
-  resolveHarnessRunEnv,
-  withinConcurrencyCap,
-} from "./billing.js";
+import { classifyRunFailure, detectFailureSignal, resolveHarnessRunEnv } from "./billing.js";
 
 // Claude Code's own variable names, used throughout as a stand-in for "whatever the running
 // Harness's catalog row declares" (issue #10) — the point under test is that the guard uses the
@@ -212,14 +207,6 @@ describe("resolveHarnessRunEnv — billing integrity (Principle IV)", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBe(BillingErrorCode.MissingCredential);
-  });
-});
-
-describe("withinConcurrencyCap", () => {
-  it("permits below the cap and blocks at/over it", () => {
-    expect(withinConcurrencyCap(3, 2)).toBe(true);
-    expect(withinConcurrencyCap(3, 3)).toBe(false);
-    expect(withinConcurrencyCap(3, 4)).toBe(false);
   });
 });
 

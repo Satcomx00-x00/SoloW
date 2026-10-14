@@ -11,6 +11,8 @@ import type {
   ForwardHandle,
   ProcessHandle,
   SpawnOpts,
+  TerminalHandle,
+  TerminalOpts,
 } from "./types.js";
 
 /**
@@ -50,6 +52,28 @@ export interface DockerIds {
   taskId: string;
   sessionId: string;
 }
+
+/**
+ * What a container is for, and so which rules find it, adopt it and reap it (`solow.role`).
+ *
+ * `session` is a Task's own container: named for the Task, adopted across Inngest replays, reaped
+ * by reading the Task table. `oneshot` is a launch that is **not** a Task's run — the Brief tab's
+ * Explain, the guided setup's test — and it must be neither of those things to a Task. Sharing the
+ * Task's name would adopt the Task's live container, and `dispose()` would then remove it; sharing
+ * its labels without its name would let the Task's own `ensureContainer` find the throwaway and
+ * `rm -f` it as a stranger. So a one-shot is named for its *request* (the `sessionId` of its
+ * `DockerIds` is a request id, never a Session's), every lookup is scoped by role, and the reaper
+ * judges it by a rule of its own — see `reapAbandonedOneShots` in `reap.ts`.
+ *
+ * `terminal` is the Task page's terminal (roadmap B4): one container per open terminal, with the
+ * Task's own mounts, removed when the window closes. Not the session container, for the reason a
+ * one-shot is not — a terminal open across a run would otherwise be adopted by that run's
+ * preflight and removed by its `dispose()`, and the terminal's `dispose()` would remove the run's —
+ * and not a one-shot, because what proves a terminal alive is a socket this process holds open,
+ * for as long as someone keeps the window, which no age ceiling can stand in for
+ * (`isOpenTerminal`).
+ */
+export type ContainerRole = "session" | "oneshot" | "terminal";
 
 /**
  * What the preflight learned about the commands a Task is going to spawn.
@@ -102,12 +126,28 @@ export interface DockerExecutorOpts {
   transcriptStore?: string;
   /** The Task's checkpoint store, bound at its own path — the hook is named by absolute path. */
   checkpointStore?: string;
+  /**
+   * Host paths that must never be inside a container, however a mount source reaches them: the
+   * orchestrator's state directories (`orchestratorStatePaths`) — the database and the key files
+   * the launchers keep beside it. The keys are in the orchestrator's environment too, which a
+   * container never inherits (`spawn` takes its env verbatim); these are the copies on disk, the
+   * other half of "the key and the database stay outside" (B5).
+   *
+   * A deny-list beside an allow-list, deliberately: a `/data` or `/srv/solow` deployment keeps its
+   * state *inside* a content area the allow-list admits, so only a named refusal can close it.
+   * A source is refused when it is one of these, contains one, or is inside one — except inside a
+   * deployment root (`worktreeRoot`, `repoCacheRoot`) nested in it, which is where the CLI keeps
+   * its worktrees.
+   */
+  protectedPaths?: readonly string[];
   /** `SOLOW_DOCKER_BIN`. Named by the caller so a wrapper script is a deployment setting. */
   dockerBin?: string;
   /** `uid:gid` for everything inside the container. See `runArgs`. */
   user?: string;
   /** Shared with the preflight, which fills it. See `CommandProbes`. */
   probedCommands?: CommandProbes;
+  /** `session` unless stated: a Task's own container. See `ContainerRole`. */
+  role?: ContainerRole;
 }
 
 /**
@@ -130,6 +170,9 @@ export function isExecutorUnavailable(cause: unknown): boolean {
  * `base64` is on the list because the environment mechanism below is built on it, so a
  * distroless or scratch image fails the preflight legibly instead of producing a harness with an
  * empty environment and no explanation. Distroless images are, deliberately, unsupported.
+ *
+ * `kill` because stopping a harness is `docker exec <container> kill -s TERM <pid>`, which needs
+ * the executable: a slim Debian has only the shell's builtin, and there a Stop did nothing at all.
  */
 export const REQUIRED_CONTAINER_UTILITIES = [
   "sh",
@@ -142,6 +185,7 @@ export const REQUIRED_CONTAINER_UTILITIES = [
   "df",
   "base64",
   "git",
+  "kill",
 ] as const;
 
 /**
@@ -164,6 +208,26 @@ export function containerName(
   deployment: string,
 ): string {
   return `solow-${sha256(`${deployment}:${ids.workspaceId}:${ids.taskId}`).slice(0, 12)}`;
+}
+
+/**
+ * The name of the container these ids and options describe — a Task's, a one-shot request's or
+ * an open terminal's.
+ *
+ * Anything but a Task's own is named for its request or connection id alone (within the
+ * deployment, like a Task's), so no Task's name can ever come out of it: the hashes are over
+ * different inputs, and the prefix keeps someone reading `docker ps` from mistaking one for the
+ * other.
+ */
+export function containerNameFor(
+  ids: DockerIds,
+  opts: Pick<DockerExecutorOpts, "worktreeRoot" | "role">,
+): string {
+  const deployment = deploymentId(opts.worktreeRoot);
+  const role = opts.role ?? "session";
+  return role === "session"
+    ? containerName(ids, deployment)
+    : `solow-${role}-${sha256(`${deployment}:${role}:${ids.sessionId}`).slice(0, 12)}`;
 }
 
 /**
@@ -263,6 +327,66 @@ eval "$(printf %s "$__b64" | base64 -d)"
 exec "$@"`;
 
 /**
+ * The prefix a terminal's variables carry through the `docker` CLI's own environment.
+ *
+ * A terminal cannot use the stdin preamble `spawn` does: its stdin is a TTY, so the line would be
+ * echoed straight back to the browser — credential and all — and a canonical-mode TTY cuts a
+ * line at 4 KiB, which a profile's settings blob passes. So the values travel the one other way
+ * that keeps them out of the host's argv: `docker exec -e NAME`, with no `=`, makes the CLI read
+ * `NAME` from its *own* environment. Prefixed, because that environment is also the CLI's
+ * configuration — a Task's `DOCKER_HOST` or `PATH` under its own name would steer the CLI rather
+ * than reach the container.
+ */
+export const TERMINAL_ENV_PREFIX = "SOLOW_ENV_";
+
+/**
+ * The detach sequence a terminal's `docker exec -t` is given in place of the default.
+ *
+ * The default is ctrl-p,ctrl-q, and the CLI holds back each byte that could begin the sequence
+ * until the next one arrives — so every ctrl-p, readline's "previous line" and a TUI's "up", sat
+ * in the CLI until another key was pressed. There is no way to turn the proxy off, only to choose
+ * what it waits for: three keys no shell or harness binds in a row, the first of them (`ctrl-\`,
+ * a SIGQUIT) the only one ever held, and that only until the next key.
+ */
+export const TERMINAL_DETACH_KEYS = "ctrl-\\,ctrl-^,ctrl-@";
+
+/**
+ * The shim a terminal's program is started through: `env -i` over exactly the names the caller
+ * set, read back from their prefixed copies, so `TerminalOpts.env` means *replace* as
+ * `SpawnOpts.env` does — the image's own `ENV` and the prefixed copies themselves are gone by the
+ * time the program starts.
+ *
+ * The names are spliced into the script, which is safe only because each one has passed
+ * `ENV_NAME` (letters, digits and `_`, never a quote); the values never are. The bootstrap `PATH`
+ * is there so `env` itself resolves — what the program runs with is the caller's `PATH`, or none.
+ */
+export function terminalShim(names: readonly string[]): string {
+  const assignments = names.map((name) => {
+    if (!ENV_NAME.test(name)) throw new Error(`invalid environment variable name: ${name}`);
+    return `'${name}'="$${TERMINAL_ENV_PREFIX}${name}" `;
+  });
+  return `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+exec env -i ${assignments.join("")}"$@"`;
+}
+
+/**
+ * The terminal containers this process holds a socket for (`ContainerRole`).
+ *
+ * The reaper's whole evidence of life for one. A terminal belongs to a WebSocket, and a socket has
+ * no record anywhere but the process serving it — so a terminal container whose name is not here
+ * was left by a predecessor that died with the window open, or by a `dispose()` whose `docker rm`
+ * failed, and either way nobody is coming back for it. In the process rather than the container's
+ * claim file because the claim cannot tell "this process still holds it" from "this process
+ * holds it but failed to remove it", and an open terminal has no lifetime an age rule could bound.
+ */
+const openTerminals = new Set<string>();
+
+/** Whether this process holds a terminal open on the container by this name. */
+export function isOpenTerminal(name: string): boolean {
+  return openTerminals.has(name);
+}
+
+/**
  * The daemon saying the container is gone, rather than the command saying no.
  *
  * **Exit 125 is not the signal**, and assuming it was is the bug this pattern exists to prevent.
@@ -342,7 +466,7 @@ function sha256(input: string): string {
  * therefore private-registry authentication — `dockerConfig` has no registry-credential field,
  * and that gap is worth stating here rather than papering over.
  */
-function dockerCliEnv(): Record<string, string> {
+export function dockerCliEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of [
     "PATH",
@@ -570,6 +694,30 @@ export async function guardMountSource(
   // answer at all reports the path the operator actually named rather than one of the rules.
   const real = await resolveLinks(path);
   const canonical = await canonicalAllowList(roots, resolveLinks);
+  const ownRoots = [...lexicalAllowList(roots).roots, ...canonical.roots];
+  for (const protectedPath of roots.protectedPaths ?? []) {
+    const [lexical, canonicalProtected] = [
+      resolve(protectedPath),
+      await resolveLinks(protectedPath),
+    ];
+    const collides = [path, real].some((candidate) =>
+      [lexical, canonicalProtected].some((secret) => {
+        // It, or anything holding it, is refused outright.
+        if (isWithin(secret, candidate)) return true;
+        if (!isWithin(candidate, secret)) return false;
+        // Inside it only by way of a deployment root the operator nested there: the CLI keeps
+        // its worktrees and cache in the same data directory as its keys.
+        return !ownRoots.some(
+          (root) => root !== secret && isWithin(root, secret) && isWithin(candidate, root),
+        );
+      }),
+    );
+    if (collides) {
+      throw new ExecutorUnavailableError(
+        `refusing to mount ${path} into the container: it is, holds, or is inside SoloW's own state (${protectedPath}) — the database and the keys that decrypt and sign everything; a harness is never given the control plane's state`,
+      );
+    }
+  }
   if (!isMountable(path, lexicalAllowList(roots)) || !isMountable(real, canonical)) {
     const via = real === path ? "" : ` (a symlink to ${real})`;
     throw new ExecutorUnavailableError(
@@ -669,7 +817,10 @@ function realpathOnHost(host: Executor, path: string): Promise<ExecResult> {
 }
 
 /** The deployment's own directories, as the operator set them. See `DockerExecutorOpts`. */
-export type MountRoots = Pick<DockerExecutorOpts, "worktreeRoot" | "repoCacheRoot">;
+export type MountRoots = Pick<
+  DockerExecutorOpts,
+  "worktreeRoot" | "repoCacheRoot" | "protectedPaths"
+>;
 
 /**
  * The three rules of the allow-list, in one spelling — lexical or canonical, never mixed.
@@ -853,14 +1004,17 @@ function labelsFor(
   ids: DockerIds,
   deployment: string,
   fingerprint: string,
+  role: ContainerRole,
 ): Record<string, string> {
   return {
     "solow.managed": "true",
-    "solow.role": "session",
+    "solow.role": role,
     "solow.schema": "1",
     "solow.deployment": deployment,
     "solow.workspace": ids.workspaceId,
-    "solow.task": ids.taskId,
+    // Omitted rather than empty for a one-shot about no Task (the setup's test): an empty label
+    // value is a filter nobody can write reliably, and a one-shot is never looked up by Task.
+    ...(ids.taskId ? { "solow.task": ids.taskId } : {}),
     "solow.run": ids.sessionId,
     "solow.cfg": fingerprint,
   };
@@ -1036,14 +1190,31 @@ export async function ensureContainer(
 ): Promise<{ name: string; created: boolean }> {
   const bin = opts.dockerBin ?? "docker";
   const deployment = deploymentId(opts.worktreeRoot);
-  const name = containerName(ids, deployment);
+  const role = opts.role ?? "session";
+  const name = containerNameFor(ids, opts);
   const user = opts.user ?? defaultContainerUser();
   const binds = await bindsFor(host, config, opts);
   const fingerprint = configFingerprint(config, binds, user);
-  const labels = labelsFor(ids, deployment, fingerprint);
+  const labels = labelsFor(ids, deployment, fingerprint, role);
 
   const docker = (args: string[]) => host.exec([bin, ...args]);
 
+  /*
+   * Scoped by role, because everything found here that is not adoptable is removed. Without it a
+   * Task's run would find the throwaway an Explain started about that same Task and `rm -f` it
+   * mid-answer; and a one-shot or a terminal is scoped to its own request or connection id for
+   * the mirror-image reason — the Task's live container is the one thing it must never touch, and
+   * neither is a second terminal open on the same Task (see `ContainerRole`).
+   */
+  const scope =
+    role === "session"
+      ? [
+          "--filter",
+          `label=solow.workspace=${ids.workspaceId}`,
+          "--filter",
+          `label=solow.task=${ids.taskId}`,
+        ]
+      : ["--filter", `label=solow.run=${ids.sessionId}`];
   const found = await docker([
     "ps",
     "-aq",
@@ -1052,9 +1223,8 @@ export async function ensureContainer(
     "--filter",
     `label=solow.deployment=${labels["solow.deployment"]}`,
     "--filter",
-    `label=solow.workspace=${ids.workspaceId}`,
-    "--filter",
-    `label=solow.task=${ids.taskId}`,
+    `label=solow.role=${role}`,
+    ...scope,
   ]);
   for (const id of found.stdout
     .split("\n")
@@ -1170,6 +1340,11 @@ export async function runPrepareScript(
  * that it reports only its first argument and exits 0, so an image missing `git`, `find` and
  * `base64` passes it cleanly. The loop asks about each one separately and prints the ones that
  * are absent, which is the answer the caller needs to name them.
+ *
+ * Present means an executable file in a `PATH` directory, which is what `docker exec` looks for.
+ * `command -v` cannot say so: dash and busybox answer `kill` for their builtin whether or not the
+ * binary exists, so it passed an image that could not stop its harness — and a check on its
+ * answer being a path fails every image instead.
  */
 export async function probeCommands(
   host: Executor,
@@ -1186,7 +1361,7 @@ export async function probeCommands(
     name,
     "sh",
     "-c",
-    'for c in "$@"; do command -v "$c" >/dev/null 2>&1 || echo "$c"; done',
+    'for c in "$@"; do f=; IFS=:; for d in $PATH; do [ -f "$d/$c" ] && [ -x "$d/$c" ] && f=1 && break; done; unset IFS; [ -n "$f" ] || echo "$c"; done',
     "sh",
     ...commands,
   ]);
@@ -1218,11 +1393,15 @@ export function createDockerExecutor(
   opts: DockerExecutorOpts,
 ): Executor {
   const bin = opts.dockerBin ?? "docker";
-  const name = containerName(ids, deploymentId(opts.worktreeRoot));
+  const name = containerNameFor(ids, opts);
   const user = opts.user ?? defaultContainerUser();
   const asUser = ["--user", user];
   const jailRoot = resolve(opts.jailRoot);
   const probes = opts.probedCommands ?? new Map<string, boolean>();
+  // From construction, not from creation: the container is made by the preflight, through
+  // `ensureContainer`, before this executor ever touches it, and a reaper pass landing in between
+  // must already see it as held. `dispose()` is what lets it go, which is why its caller owns one.
+  if (opts.role === "terminal") openTerminals.add(name);
 
   /**
    * The container, built at most once per executor.
@@ -1489,6 +1668,49 @@ export function createDockerExecutor(
       };
     },
 
+    /**
+     * A program on a TTY *inside* the container: `docker exec -it`, run on a pseudo-terminal of
+     * the host's.
+     *
+     * The host's terminal is the `docker` CLI's, which puts it in raw mode and relays every byte to
+     * a TTY the container's runtime allocates — so line editing, ^C and job control are the
+     * container's own, and a resize reaches the program as the CLI's `SIGWINCH` (see `local.ts`).
+     * The environment goes by name through the CLI's own (`TERMINAL_ENV_PREFIX`), and a missing
+     * container answers `No such container` and a non-zero exit, which the pane reports as such.
+     *
+     * Hanging up ends the CLI, not necessarily the program — the daemon closes its stdin and a
+     * shell may outlive that. What guarantees nothing is left running is `dispose()`, which removes
+     * the container; a terminal executor is never one a run shares (`ContainerRole`).
+     */
+    openTerminal(cmd: string[], termOpts: TerminalOpts): TerminalHandle {
+      if (!host.openTerminal) throw new Error("this host cannot open a pseudo-terminal");
+      const names = Object.keys(termOpts.env);
+      const shim = terminalShim(names);
+      const cliEnv = dockerCliEnv();
+      for (const key of names) cliEnv[`${TERMINAL_ENV_PREFIX}${key}`] = termOpts.env[key] as string;
+      return host.openTerminal(
+        [
+          bin,
+          "exec",
+          "-i",
+          "-t",
+          "--detach-keys",
+          TERMINAL_DETACH_KEYS,
+          ...asUser,
+          "-w",
+          termOpts.cwd,
+          ...names.flatMap((key) => ["-e", `${TERMINAL_ENV_PREFIX}${key}`]),
+          name,
+          "/bin/sh",
+          "-c",
+          shim,
+          "sh",
+          ...cmd,
+        ],
+        { ...termOpts, cwd: process.cwd(), env: cliEnv },
+      );
+    },
+
     async exec(cmd: string[], execOpts: ExecOpts = {}): Promise<ExecResult> {
       // Two paths, because most call sites pass no environment and a shimmed exec costs an
       // extra process and a stdin round trip for nothing.
@@ -1660,6 +1882,10 @@ export function createDockerExecutor(
         await host.exec([bin, "rm", "-f", name]);
       } catch {
         // A daemon that has gone away has already disposed of it more thoroughly than we could.
+      } finally {
+        // Let go whether or not the removal took: a terminal container that outlived this call is
+        // exactly what the reaper is for, and it reaps only what is no longer held here.
+        openTerminals.delete(name);
       }
     },
   };

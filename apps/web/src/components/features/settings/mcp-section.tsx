@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import {
   SectionStatus,
@@ -261,7 +262,7 @@ export function McpSection() {
         </form>
         {issue.error && (
           <p className="text-destructive text-sm" role="alert">
-            {issue.error.message}
+            {describeError(issue.error)}
           </p>
         )}
       </SettingsCreate>
@@ -289,7 +290,7 @@ export function McpSection() {
 
       {revoke.error && (
         <p className="text-destructive text-sm" role="alert">
-          {revoke.error.message}
+          {describeError(revoke.error)}
         </p>
       )}
     </SettingsSection>

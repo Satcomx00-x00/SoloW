@@ -717,6 +717,14 @@ check_reason usable "$NO_DOCKER" no
 check_reason usable "$NO_DAEMON" no
 check_reason usable "could not obtain image" no
 check_reason usable "exited immediately" no
+# Except SoloW's own executor image (`docker/executor/Dockerfile`, known by the title it labels
+# itself with), which exists to pass: a preflight that refused it would refuse every isolated Task.
+TITLE="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.title"}}' "$IMAGE" 2> /dev/null || true)"
+if [ "$TITLE" = "solow-executor" ] && [ "$(cat "$WORK/pf-usable.verdict")" != "ok" ]; then
+    echo "smoke-docker-executor: the preflight refused SoloW's own executor image:" >&2
+    sed 's/^/    /' "$WORK/pf-usable.reason" >&2
+    exit 1
+fi
 
 # And the daemon's own half of it: a preflight that has returned a verdict must not have left a
 # container behind at all. Nothing else this run created survives at this point, so this census is
@@ -728,6 +736,20 @@ check_reason usable "exited immediately" no
 # makes the broken-image rung leak a container in state `Created`, which never appears in
 # `docker ps` and so passed this block while the leak it exists to catch was happening. A
 # `Created` container holds its CPU and memory reservation exactly as a running one does.
+#
+# Except the control's, when it passed: a ladder that passes keeps its container on purpose, since
+# that is the one the run goes on to adopt (`ensureContainer`). Only an image carrying `git` gets
+# that far — `alpine:3` stops at rung 8 — so this is what `SMOKE_DOCKER_IMAGE=solow-executor:local`
+# looks like. It has to be up, and is then removed, so the census asks about the failed rungs only.
+if [ "$(cat "$WORK/pf-usable.verdict")" = "ok" ]; then
+    KEPT="$(docker ps -q --filter "label=solow.workspace=$WORKSPACE" \
+        --filter "label=solow.task=preflight-usable")"
+    [ -n "$KEPT" ] || {
+        echo "smoke-docker-executor: the control's ladder passed but kept no running container." >&2
+        exit 1
+    }
+    echo "$KEPT" | xargs docker rm -f > /dev/null
+fi
 LEFTOVER="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE")"
 [ -z "$LEFTOVER" ] || {
     echo "smoke-docker-executor: a preflight that failed left a container behind:" >&2
@@ -928,7 +950,7 @@ echo "==> AC-4  orphan reconciliation, against a simulated crash"
 # "orphan reconciliation tested against a simulated crash" in those words.
 #
 # Two containers, identical in every respect the reaper can see except one: the epoch in
-# `/run/solow/owner`. Same deployment, same labels, a Task row in `review` and a Session whose id
+# `/run/solow/owner`. Same deployment, same labels, a Task row in `running` and a Session whose id
 # matches the container's `solow.run` for both — so the sweep's verdict on each turns on the claim
 # and on nothing else. That is what makes this a differential rather than two unrelated
 # containers, and it is why both directions are asserted: a reaper that removes everything passes
@@ -1021,8 +1043,10 @@ if (readback.stdout.trim() !== crashed) {
 
 // A real database with real migrations, because the reaper's evidence of life is read out of one
 // with two joins and a state test. Rows that made both containers look *dead* would let a reaper
-// that removes everything pass, so both Tasks are seeded the way a live run at the review gate
-// leaves them: `review`, no failure reason, and the newest Session matching `solow.run`.
+// that removes everything pass, so both Tasks are seeded the way a live run leaves them while it
+// holds its container: `running`, no failure reason, and the newest Session matching `solow.run`.
+// Not `review`: since ADR 0030 a run ends at the gate and disposes of its container, so a `review`
+// row holds nothing and the reaper rightly takes both.
 const db = createTestDb();
 await db.insert(workspaceTable).values({ id: workspace, name: workspace, ownerUserId: "smoke" });
 await db.insert(issue).values({ id: "iss-smoke", workspaceId: workspace, title: "smoke" });
@@ -1057,7 +1081,7 @@ for (const box of [orphan, live]) {
     workspaceId: workspace,
     issueId: "iss-smoke",
     title: box.ids.taskId,
-    state: "review",
+    state: "running",
     agentProfileId: "ap-smoke",
     executorProfileId: "ex-smoke",
   });
@@ -1096,8 +1120,8 @@ sed 's/^/    /' "$WORK/reap.log"
 
 # Both halves asked of the daemon. The first is the one a reaper that does nothing fails; the
 # second is the one a reaper that removes everything fails, and it is the expensive one to get
-# wrong — a container removed out from under a run at the review gate takes the harness's exec with
-# it and fails the round with no explanation an operator can see.
+# wrong — a container removed out from under a live run takes the harness's exec with it and
+# fails the round with no explanation an operator can see.
 ORPHANED="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE" --filter "label=solow.task=reap-orphan")"
 [ -z "$ORPHANED" ] || {
     echo "smoke-docker-executor: the reaper left a crashed orchestrator's container behind:" >&2

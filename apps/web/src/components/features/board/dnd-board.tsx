@@ -16,7 +16,7 @@ import {
 import type { TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
 import { GripVertical } from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { type BoardColumn, columnIdFor, lifecycleColumns } from "@/lib/board-columns";
 import { nestSubtasks } from "@/lib/subtask-nesting";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,8 @@ import {
   SUBTASK_INDENT_CLASS,
 } from "./column";
 import { TaskCard } from "./task-card";
+
+const NO_TASKS: TaskDto[] = [];
 
 /**
  * A draggable card. The drag listeners live on a dedicated handle rather than the card body:
@@ -376,6 +378,18 @@ export function DndBoard({
   };
 
   const announcements = boardAnnouncements(columns, tasks);
+  // Each card's column, decided once: asked per column instead, every card was placed once for
+  // every lane on the board, and `columnIdFor` scans the columns itself each time.
+  const byColumn = useMemo(() => {
+    const held = new Map<string | null, TaskDto[]>();
+    for (const task of tasks) {
+      const id = columnIdFor(task, columns);
+      const list = held.get(id);
+      if (list) list.push(task);
+      else held.set(id, [task]);
+    }
+    return held;
+  }, [tasks, columns]);
 
   return (
     <DndContext
@@ -393,7 +407,7 @@ export function DndBoard({
           // `Other work` is the one column that earns its place only when it has something in
           // it: an always-present empty lane would imply the Workspace has stray work when it
           // has none.
-          const held = tasks.filter((task) => columnIdFor(task, columns) === column.id);
+          const held = byColumn.get(column.id) ?? NO_TASKS;
           if (column.kind === "other" && held.length === 0) return null;
           // Only in the `Other work` lane: everywhere else the column itself already says which
           // pipeline the card is on, and repeating it on every tile would be noise.

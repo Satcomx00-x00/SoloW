@@ -5,8 +5,9 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFakeAcpBin } from "@solow/acp/testing";
+import { writeFakeClaudeBin } from "@solow/claude-code/testing";
 import { createLocalExecutor } from "../executor/local.js";
-import { probeHarness } from "./probe.js";
+import { answerProbeTurn, probeHarness } from "./probe.js";
 
 /**
  * "Does this harness work?", answered before a Task is queued rather than after one fails
@@ -175,4 +176,101 @@ describe("probeHarness", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBeTruthy();
   }, 30_000);
+
+  it("says a missing command is missing, so a caller need not parse the sentence", async () => {
+    const cwd = await dir();
+
+    const result = await probeHarness(createLocalExecutor(cwd), {
+      ...base(cwd),
+      command: join(cwd, "definitely-not-installed"),
+      protocol: "claude_code_stream_json",
+    });
+
+    expect(result.failure).toBe("missing");
+  });
+});
+
+/**
+ * The guided setup's test run (roadmap E1): a probe that passed, followed by one real prompt.
+ *
+ * What it has to catch is the case the bare probe cannot: Claude Code starts happily with any
+ * token at all, and only a prompt makes the provider look at it. The fake CLI answers the way the
+ * real one was observed to — the rejection arrives as assistant text and an `is_error` result
+ * whose subtype still reads "success".
+ */
+describe("answerProbeTurn", () => {
+  const passed = {
+    ok: true,
+    reason: null,
+    protocolVersion: null,
+    authMethods: [],
+    agent: null,
+    capabilities: { models: [], modes: [] },
+  };
+
+  async function turnWith(script: Parameters<typeof writeFakeClaudeBin>[1]) {
+    const cwd = await dir();
+    const command = await writeFakeClaudeBin(cwd, script);
+    return answerProbeTurn(createLocalExecutor(cwd), passed, {
+      ...base(cwd),
+      command,
+      protocol: "claude_code_stream_json",
+    });
+  }
+
+  it("passes when the harness answers the prompt", async () => {
+    const result = await turnWith({ turns: [{ text: ["ready"] }] });
+
+    expect(result.ok).toBe(true);
+    expect(result.answered).toBe(true);
+  });
+
+  it("names a refused credential as the credential", async () => {
+    const result = await turnWith({
+      turns: [{ text: ["Invalid API key · Fix external API key"] }],
+      failWith: "success",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe("credential");
+    // The CLI's own words, not the subtype that said "success" for a turn that failed.
+    expect(result.reason).toContain("Invalid API key");
+  });
+
+  it("tells a spent plan apart from a bad credential", async () => {
+    const result = await turnWith({
+      turns: [{ text: ["Claude AI usage limit reached|1760000000"] }],
+      failWith: "success",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe("quota");
+  });
+
+  it("does not claim an answer from a protocol it cannot prompt outside a run", async () => {
+    const cwd = await dir();
+
+    const result = await answerProbeTurn(createLocalExecutor(cwd), passed, {
+      ...base(cwd),
+      command: "never-started",
+      protocol: "acp",
+    });
+
+    // The handshake stands as the result; nothing was spawned for a turn that cannot happen.
+    expect(result.ok).toBe(true);
+    expect(result.answered).toBe(false);
+  });
+
+  it("leaves a failed probe as it was, without spending a turn on it", async () => {
+    const cwd = await dir();
+    const failed = { ...passed, ok: false, reason: "no", failure: "missing" as const };
+
+    const result = await answerProbeTurn(createLocalExecutor(cwd), failed, {
+      ...base(cwd),
+      command: "never-started",
+      protocol: "claude_code_stream_json",
+    });
+
+    expect(result).toEqual({ ...failed, answered: false });
+  });
 });

@@ -6,20 +6,47 @@ import type {
   ParentPlanningContainer,
   ProjectDto,
 } from "@solow/contracts";
-import { ChevronDown, Milestone, Plus, SquarePen } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, Download, Milestone, Plus, SquarePen } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
-import { CreateIssueDialog } from "./create-issue-dialog";
-import { CreateParentItemDialog } from "./create-parent-item-dialog";
+
+/*
+ * The four dialogs behind this menu, loaded on first use rather than with the project page. They
+ * are mounted only while open (below), and the issue form alone is over a thousand lines of
+ * pickers the table never draws — all downloaded and parsed on every visit to a project for a
+ * menu most visits never open. Opening the menu starts the fetch, so by the time an entry is
+ * picked the dialog is usually already here.
+ */
+const loadCreateIssue = () => import("./create-issue-dialog");
+const loadParentItem = () => import("./create-parent-item-dialog");
+const loadIssueForm = () => import("@/components/features/issues/issue-form-dialog");
+const loadImport = () => import("@/components/features/issues/import-issues-dialog");
+const CreateIssueDialog = lazy(() =>
+  loadCreateIssue().then((m) => ({ default: m.CreateIssueDialog })),
+);
+const CreateParentItemDialog = lazy(() =>
+  loadParentItem().then((m) => ({ default: m.CreateParentItemDialog })),
+);
+const IssueFormDialog = lazy(() => loadIssueForm().then((m) => ({ default: m.IssueFormDialog })));
+const ImportIssuesDialog = lazy(() =>
+  loadImport().then((m) => ({ default: m.ImportIssuesDialog })),
+);
+const preloadDialogs = () => {
+  void loadCreateIssue();
+  void loadParentItem();
+  void loadIssueForm();
+  void loadImport();
+};
 
 /**
  * The `＋ New` split-button (spec F23a Part 1), top-right of the Project toolbar.
@@ -72,6 +99,34 @@ export function issueItemState(repos: readonly RepoLike[]): {
         enabled: false,
         reason:
           "This project has no provider-backed repository — connect a GitHub or GitLab repository to create issues.",
+      };
+}
+
+/**
+ * Where "New issue" goes: the provider when a repository is connected to one, SoloW otherwise.
+ *
+ * A Project of only local repositories used to meet a disabled entry here, which left the
+ * self-hosted solo user with no way to make an Issue at all (roadmap A2). The local Issue form
+ * was always there, so the entry now falls through to it instead of stopping at a reason.
+ */
+export function newIssueTarget(repos: readonly RepoLike[]): "provider" | "local" {
+  return issueItemState(repos).enabled ? "provider" : "local";
+}
+
+/**
+ * Can issues be imported, and if not, why not? Import reads from a provider, so it needs the same
+ * thing provider creation does — and says so, rather than vanishing from the menu.
+ */
+export function importItemState(repos: readonly RepoLike[]): {
+  enabled: boolean;
+  reason: string | null;
+} {
+  return repos.some((r) => r.integrationId !== null)
+    ? { enabled: true, reason: null }
+    : {
+        enabled: false,
+        reason:
+          "Importing reads from GitHub or GitLab. Connect a provider-backed repository to import issues.",
       };
 }
 
@@ -147,7 +202,7 @@ export function parentPlanningItemState(args: {
 }
 
 export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
-  const [dialog, setDialog] = useState<"issue" | "parent" | null>(null);
+  const [dialog, setDialog] = useState<"issue" | "local" | "import" | "parent" | null>(null);
 
   const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
   // Behind the integrations flag; `retry: false` so a Workspace with the flag off settles quickly
@@ -155,7 +210,8 @@ export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
   const integrations = trpc.integration.list.useQuery({}, { retry: false });
   const manifests = trpc.integration.providers.useQuery({}, { retry: false });
 
-  const issueState = issueItemState(repos.data?.items ?? []);
+  const issueTarget = newIssueTarget(repos.data?.items ?? []);
+  const importState = importItemState(repos.data?.items ?? []);
   const parentState = parentPlanningItemState({
     integrationId: project.integrationId,
     integrations: integrations.data ?? [],
@@ -170,7 +226,7 @@ export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => open && preloadDialogs()}>
         <DropdownMenuTrigger asChild>
           <Button size="xs" className="gap-1">
             <Plus aria-hidden /> New
@@ -178,14 +234,22 @@ export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuLabel className="text-2xs">Create on the provider</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-2xs">Create</DropdownMenuLabel>
           <DropdownMenuItem
-            disabled={!issueState.enabled}
-            title={issueState.reason ?? undefined}
-            onSelect={() => setDialog("issue")}
+            title={
+              issueTarget === "local"
+                ? "No repository here is connected to a provider, so the issue is kept in SoloW."
+                : undefined
+            }
+            onSelect={() => setDialog(issueTarget === "provider" ? "issue" : "local")}
           >
             <SquarePen aria-hidden /> New issue
           </DropdownMenuItem>
+          {issueTarget === "provider" && (
+            <DropdownMenuItem onSelect={() => setDialog("local")}>
+              <SquarePen aria-hidden /> New local issue
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             disabled={!parentState.enabled}
             title={parentState.reason ?? undefined}
@@ -196,34 +260,54 @@ export function ProjectCreateMenu({ project }: { project: ProjectDto }) {
                 The fallback is only ever seen disabled, where there is no provider to ask. */}
             <Milestone aria-hidden /> New {parentState.noun ?? "parent item"}
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={!importState.enabled}
+            title={importState.reason ?? undefined}
+            onSelect={() => setDialog("import")}
+          >
+            <Download aria-hidden /> Import issues…
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       {/* Mounted only while open, so each dialog starts from empty form state every time — the
           same reason every other create surface in the app keys its dialogs on open, rather than
           rendering them always and reaching for a reset path. */}
-      {dialog === "issue" && (
-        <CreateIssueDialog
-          projectId={project.id}
-          /* The `epics` flag alone, not this menu's gate: the picker asks whether there are epics
+      <Suspense fallback={null}>
+        {dialog === "issue" && (
+          <CreateIssueDialog
+            projectId={project.id}
+            /* The `epics` flag alone, not this menu's gate: the picker asks whether there are epics
              to nest an Issue under, which is a different question from whether one can be made. */
-          epicsSupported={parentState.epicsSupported}
-          open
-          onOpenChange={(next) => !next && setDialog(null)}
-          onCreated={onCreated}
-        />
-      )}
-      {dialog === "parent" && parentState.integrationId && parentState.container && (
-        <CreateParentItemDialog
-          projectId={project.id}
-          integrationId={parentState.integrationId}
-          container={parentState.container}
-          noun={parentState.noun ?? "parent item"}
-          open
-          onOpenChange={(next) => !next && setDialog(null)}
-          onCreated={onCreated}
-        />
-      )}
+            epicsSupported={parentState.epicsSupported}
+            open
+            onOpenChange={(next) => !next && setDialog(null)}
+            onCreated={onCreated}
+          />
+        )}
+        {dialog === "local" && (
+          <IssueFormDialog open onOpenChange={(next) => !next && setDialog(null)} />
+        )}
+        {dialog === "import" && (
+          <ImportIssuesDialog
+            trigger={null}
+            open
+            onOpenChange={(next) => !next && setDialog(null)}
+          />
+        )}
+        {dialog === "parent" && parentState.integrationId && parentState.container && (
+          <CreateParentItemDialog
+            projectId={project.id}
+            integrationId={parentState.integrationId}
+            container={parentState.container}
+            noun={parentState.noun ?? "parent item"}
+            open
+            onOpenChange={(next) => !next && setDialog(null)}
+            onCreated={onCreated}
+          />
+        )}
+      </Suspense>
     </>
   );
 }

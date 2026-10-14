@@ -100,7 +100,7 @@ const REQUIRED_METHODS: Record<IntegrationCapability, readonly string[]> = {
   issues: ["listIssues", "getIssue", "listLabels", "listComments"],
   issueWrites: ["updateIssue", "listAssignableUsers", "listMilestones", "createComment"],
   repositories: ["listRepositories", "getRepository", "listBranches"],
-  changeRequests: ["listChangeRequests"],
+  changeRequests: ["listChangeRequests", "upsertChangeRequest"],
   projects: ["listProjects", "readProjectFields", "readProjectItems", "writeProjectFieldValue"],
   labelWrites: ["createLabels"],
   issueCreates: [

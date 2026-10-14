@@ -20,7 +20,7 @@ business-level; it does not prescribe visual design.
 6. **Profiles** — Harness Profiles and Executor Profiles.
 7. **Integrations** — Connections to external trackers, chat, and source hosts.
 8. **Insights** — Analytics and reporting on throughput and harness activity.
-9. **Settings** — Workspace configuration, secrets, members and access (hosted), platform
+9. **Settings** — Workspace configuration, secrets, members and access (hosted, Later), platform
    options, and the entry point to re-run the **Setup Workflow** (onboarding).
 
 On first use of a Workspace, a guided **Setup Workflow** (onboarding) runs before the areas

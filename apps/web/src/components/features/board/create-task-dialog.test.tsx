@@ -106,11 +106,33 @@ describe("CreateTaskDialog — Issue picker filtered by Repository", () => {
     );
   });
 
+  it("reads nothing while it is closed, and everything it needs once it opens", async () => {
+    // The board and the Issue page keep this dialog mounted on every visit.
+    const { log } = renderWithTrpc(<CreateTaskDialog />, handlers);
+    const trigger = await screen.findByRole("button", { name: "New task" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(log.calls).toEqual([]);
+
+    fireEvent.click(trigger);
+    await waitFor(() =>
+      expect(new Set(log.calls.map((c) => c.path))).toEqual(
+        new Set([
+          "issue.list",
+          "profile.agent.list",
+          "profile.executor.list",
+          "repository.list",
+          "preference.getTaskDefaults",
+        ]),
+      ),
+    );
+  });
+
   it("labels the Issue picker's placeholder to say a Repository comes first", async () => {
     renderWithTrpc(<CreateTaskDialog />, handlers);
     fireEvent.click(await screen.findByRole("button", { name: "New task" }));
 
-    expect(screen.getByText("Select a repository first")).toBeDefined();
+    // Found, not got: the form's reads go out when it opens, and it says it is loading until then.
+    expect(await screen.findByText("Select a repository first")).toBeDefined();
   });
 });
 
@@ -279,5 +301,58 @@ describe("CreateTaskDialog — the chosen Issue", () => {
     await pick("Issue", "Ship it");
 
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("My own name");
+  });
+});
+
+describe("CreateTaskDialog — isolation by default (roadmap B4)", () => {
+  const server = (executors: Array<{ id: string; name: string; kind: string }>, mode: string) => ({
+    ...handlers,
+    "profile.agent.list": () => ({
+      items: [{ id: "harness-1", name: "Claude", permissionMode: mode }],
+      nextCursor: null,
+    }),
+    "profile.executor.list": () => ({ items: executors, nextCursor: null }),
+  });
+
+  it("opens on the Docker executor when nothing is saved as the default", async () => {
+    renderWithTrpc(
+      <CreateTaskDialog />,
+      server(
+        [
+          { id: "exec-1", name: "Local", kind: "local" },
+          { id: "exec-2", name: "Sandbox", kind: "docker" },
+        ],
+        "bypassPermissions",
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await waitFor(async () => {
+      expect((await screen.findByRole("combobox", { name: "Executor" })).textContent).toContain(
+        "Sandbox",
+      );
+    });
+    expect(screen.queryByText("This run is not isolated")).toBeNull();
+  });
+
+  it("warns when never-ask is paired with the local executor", async () => {
+    renderWithTrpc(
+      <CreateTaskDialog />,
+      server([{ id: "exec-1", name: "Local", kind: "local" }], "bypassPermissions"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await pick("Harness profile", "Claude");
+    await pick("Executor", "Local");
+    expect(await screen.findByText("This run is not isolated")).toBeDefined();
+  });
+
+  it("says nothing for the local executor when the harness still asks first", async () => {
+    renderWithTrpc(
+      <CreateTaskDialog />,
+      server([{ id: "exec-1", name: "Local", kind: "local" }], "acceptEdits"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await pick("Harness profile", "Claude");
+    await pick("Executor", "Local");
+    expect(screen.queryByText("This run is not isolated")).toBeNull();
   });
 });

@@ -47,7 +47,8 @@ independent of which harness tool is used, and adding a harness does not change 
 ## Tenancy & access
 
 In hosted mode, the Workspace is the tenancy and access boundary; access is enforced on
-every action, not only in the interface.
+every action, not only in the interface. *Hosted mode is Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)). Today every table
+is scoped to a Workspace, and an installation has one Owner and one Workspace.*
 → [F16](../features/F16-platform-deployment.md)
 
 ## Auditability

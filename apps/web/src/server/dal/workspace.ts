@@ -2,27 +2,28 @@ import "server-only";
 import {
   CommonErrorCode,
   err,
+  HISTORY_RETENTION_DAY_OPTIONS,
+  HISTORY_RETENTION_DEFAULT_DAYS,
+  type HistoryRetentionDto,
+  type HistoryRetentionPreviewDto,
   ok,
+  type PreviewHistoryRetentionInput,
   type RenameWorkspaceInput,
   type ResetWorkspaceInput,
   type Result,
-  type SetupStepDto,
+  type SetHistoryRetentionInput,
   type SyncRequestDto,
   type SyncStatusDto,
   type WorkspaceDto,
   type WorkspaceResetDto,
-  type WorkspaceSetupDto,
 } from "@solow/contracts";
 import {
   type Db,
-  executorProfile,
   FLAGS,
   type FlagKey,
-  harnessCatalog,
-  harnessProfile,
+  previewHistoryPrune,
   repository,
   resetWorkspace,
-  secret,
   workspace,
 } from "@solow/db";
 import { and, count, eq, isNotNull } from "drizzle-orm";
@@ -198,98 +199,56 @@ export async function renameWorkspace(
   return ok({ id: row.id, name: row.name, createdAt: row.createdAt });
 }
 
-/** How many rows of one kind this Workspace has. */
-async function tally(
+/**
+ * How long a finished Task keeps its transcript (Decision 0032). The orchestrator's hourly
+ * retention sweep is what acts on it; this only reads and writes the Workspace's choice.
+ */
+export async function getHistoryRetention(
   ctx: RequestContext,
-  table: typeof secret | typeof harnessProfile | typeof executorProfile | typeof repository,
-): Promise<number> {
+): Promise<Result<HistoryRetentionDto>> {
   const [row] = await ctx.db
-    .select({ n: count() })
-    .from(table)
-    .where(eq(table.workspaceId, ctx.workspaceId));
-  return row?.n ?? 0;
+    .select({ days: workspace.historyRetentionDays, notice: workspace.historyRetentionNotice })
+    .from(workspace)
+    .where(eq(workspace.id, ctx.workspaceId))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+  return ok({
+    // A value outside the offered list can only have been written by hand; reading it as the
+    // default rather than failing keeps Settings usable, and the next save puts it right.
+    days:
+      row.days === null || (HISTORY_RETENTION_DAY_OPTIONS as readonly number[]).includes(row.days)
+        ? (row.days as HistoryRetentionDto["days"])
+        : HISTORY_RETENTION_DEFAULT_DAYS,
+    notice: row.notice,
+    defaultDays: HISTORY_RETENTION_DEFAULT_DAYS,
+    options: [...HISTORY_RETENTION_DAY_OPTIONS],
+  });
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+export async function setHistoryRetention(
+  ctx: RequestContext,
+  input: SetHistoryRetentionInput,
+): Promise<Result<HistoryRetentionDto>> {
+  const updated = await ctx.db
+    .update(workspace)
+    // Any save is the Owner's answer to the upgrade notice, "keep forever" included.
+    .set({
+      historyRetentionDays: input.days,
+      historyRetentionNotice: false,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(workspace.id, ctx.workspaceId))
+    .returning({ id: workspace.id });
+  if (updated.length === 0) return err(CommonErrorCode.NotFound);
+  return getHistoryRetention(ctx);
+}
 
-/**
- * What this Workspace still needs, read from what it actually has (2026-08-28).
- *
- * This replaced a fixture. A local install used to arrive with two invented companies, each
- * already holding a credential, a Harness Profile, an Executor and a repository — so the product
- * looked configured on first launch and the real gap stayed invisible: a Workspace made by a
- * genuine sign-up has none of those, and its feature flags are off, so the core loop is
- * disabled. The honest version is to ask the database.
- *
- * Derived on every read rather than stored. A checklist that recorded "completed" would go on
- * saying so after the Secret it counted was deleted, which is precisely the moment it should say
- * otherwise — so this doubles as a standing health view instead of a one-time ceremony.
- */
-export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<WorkspaceSetupDto>> {
-  const found = await getWorkspace(ctx);
-  if (!found.ok) return found;
-
-  const [catalog] = await ctx.db
-    .select({ n: count() })
-    .from(harnessCatalog)
-    .where(eq(harnessCatalog.workspaceId, ctx.workspaceId));
-  const harnesses = catalog?.n ?? 0;
-
-  const [secrets, profiles, executors, repositories] = await Promise.all([
-    tally(ctx, secret),
-    tally(ctx, harnessProfile),
-    tally(ctx, executorProfile),
-    tally(ctx, repository),
-  ]);
-
-  const flags = await getWorkspaceFlags(ctx.db, ctx.workspaceId);
-  const coreLoop = flags["ff-core-program"] ?? FLAGS["ff-core-program"].default;
-
-  const steps: SetupStepDto[] = [
-    // Always done by the time anyone can read this — but listed, because a checklist that only
-    // shows what is missing gives no sense of how much of the whole it represents.
-    { key: "workspace", done: true, detail: found.data.name, blockedBy: null },
-    {
-      key: "agents",
-      done: harnesses > 0,
-      detail: harnesses > 0 ? plural(harnesses, "harness") : "",
-      blockedBy: null,
-    },
-    {
-      key: "secret",
-      done: secrets > 0,
-      detail: secrets > 0 ? plural(secrets, "secret") : "",
-      blockedBy: null,
-    },
-    {
-      key: "agent-profile",
-      done: profiles > 0,
-      detail: profiles > 0 ? plural(profiles, "profile") : "",
-      // A Profile binds a harness to a credential, so offering the form before one exists would
-      // open it on an empty picker — a worse answer than naming what is missing.
-      blockedBy: profiles === 0 && secrets === 0 ? "secret" : null,
-    },
-    {
-      key: "executor",
-      done: executors > 0,
-      detail: executors > 0 ? plural(executors, "executor") : "",
-      blockedBy: null,
-    },
-    {
-      key: "repository",
-      done: repositories > 0,
-      detail: repositories > 0 ? plural(repositories, "repository", "repositories") : "",
-      blockedBy: null,
-    },
-    {
-      key: "core-loop",
-      done: coreLoop,
-      detail: coreLoop ? "on" : "",
-      blockedBy: null,
-    },
-  ];
-
-  return ok({ workspace: found.data, steps, ready: steps.every((step) => step.done) });
+/** What a window would remove if the sweep ran now — read by Settings before a save. */
+export async function previewHistoryRetention(
+  ctx: RequestContext,
+  input: PreviewHistoryRetentionInput,
+): Promise<Result<HistoryRetentionPreviewDto>> {
+  return ok(previewHistoryPrune(ctx.db, ctx.workspaceId, input.days));
 }
 
 /**
@@ -323,15 +282,20 @@ export async function resetWorkspaceData(
 
   const result = ctx.db.transaction((tx) => resetWorkspace(tx, ctx.workspaceId, input.scope));
 
-  for (const entry of result.purge) {
-    // Best effort, never fatal, exactly as `deleteIssue`'s purge is: the rows are gone, and an
-    // orchestrator that is not running is not a reason to report the reset as having failed.
-    await orchestrator.purgeTaskFiles({
-      workspaceId: ctx.workspaceId,
-      taskId: entry.taskId,
-      worktrees: entry.worktrees,
-    });
-  }
+  // Best effort, never fatal, exactly as `deleteIssue`'s purge is: the rows are gone, and an
+  // orchestrator that is not running is not a reason to report the reset as having failed.
+  // `allSettled` is what makes that true — `purgeTaskFiles` throws on a refused or unreachable
+  // orchestrator, and an awaited loop reported the committed reset as an error. It also sends the
+  // requests together rather than one round trip per Task.
+  await Promise.allSettled(
+    result.purge.map((entry) =>
+      orchestrator.purgeTaskFiles({
+        workspaceId: ctx.workspaceId,
+        taskId: entry.taskId,
+        worktrees: entry.worktrees,
+      }),
+    ),
+  );
 
   return ok({
     scope: input.scope,

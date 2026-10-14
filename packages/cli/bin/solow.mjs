@@ -16,12 +16,17 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -101,6 +106,9 @@ function usage() {
 
   Usage
     npx solow [options]
+    npx solow backup  [--out <dir>] [--no-engine] [--data-dir <path>]
+    npx solow restore [<backup>] [--data-dir <path>]   (lists backups without <backup>)
+    npx solow executor-image [--tag <name>]            (needs Docker; see below)
 
   Options
     -p, --port <n>        Port for the web UI          (default ${DEFAULTS.web})
@@ -117,9 +125,20 @@ function usage() {
     SOLOW_FETCH_BINARIES  Set to 1 to let this command download the Bun and Inngest
                           binaries when your npm skipped their install hooks. Off by
                           default: starting the app never fetches anything on its own.
+    SOLOW_BIND_HOST       Interface the web app, orchestrator and Inngest listen on
+                          (default 127.0.0.1, this machine only). Set it to 0.0.0.0 to reach
+                          SoloW from the network; a warning is printed.
+    SOLOW_DEV_OWNER       Set to on to skip sign-in (development only; refused together with
+                          a non-loopback SOLOW_BIND_HOST).
 
   On first run this creates the database, applies migrations, creates your workspace and
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
+  Before an upgrade changes the database, a copy of it and its keys is kept in
+  <data-dir>/backups. \`backup\` works while SoloW runs; \`restore\` needs it stopped.
+
+  \`executor-image\` builds ${DEFAULT_EXECUTOR_IMAGE} (or $SOLOW_EXECUTOR_IMAGE), the image with
+  Claude Code and opencode in it. Once it exists, the guided setup runs Claude in an isolated
+  container on this machine instead of directly as you.
 `);
 }
 
@@ -368,46 +387,183 @@ function resolveInngest() {
  * Secrets are generated once and persisted, not derived per run: the database encrypts stored
  * provider tokens with `SOLOW_SECRET_KEY`, so a key that changed between runs would leave every
  * previously stored secret undecryptable. Written 0600 — they are the keys to that data.
+ *
+ * An exported value wins, as it does in `scripts/lib/engine-env.sh`: a deployment that manages
+ * its own secrets must not have them silently replaced by the files.
+ *
+ * An empty file, which an interrupted first run or a full disk leaves, is no key and is replaced —
+ * the same `[ -s ]` rule as the shell launchers. Read as it was, it set an empty key.
  */
-function secret(dataDir, name, make) {
+function secret(dataDir, name, make, envName) {
+  const exported = process.env[envName];
+  if (exported) return exported;
   const file = join(dataDir, name);
-  if (existsSync(file)) return readFileSync(file, "utf8").trim();
+  if (existsSync(file) && statSync(file).size > 0) return readFileSync(file, "utf8").trim();
   const value = make();
   writeFileSync(file, `${value}\n`, { mode: 0o600 });
+  // The mode above only applies to a file this call creates, not to the empty one it replaced.
+  chmodSync(file, 0o600);
   return value;
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+/** The interface every service listens on. Network exposure is a choice, so it is named once. */
+function bindHost() {
+  return process.env.SOLOW_BIND_HOST || "127.0.0.1";
+}
+
+/**
+ * Where the services reach each other. Not `localhost`, which can resolve to ::1 while they listen
+ * on 127.0.0.1, and which a specific LAN bind address is not listening on at all. A wildcard bind
+ * is reachable on loopback. Same rule as `scripts/lib/engine-env.sh`.
+ */
+function internalHost() {
+  const host = bindHost();
+  if (host === "0.0.0.0" || host === "::" || host === "localhost") return "127.0.0.1";
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+/** Called once at start: says out loud what leaving the machine means, and refuses the worst case. */
+function checkExposure() {
+  const host = bindHost();
+  if (LOOPBACK_HOSTS.has(host) || host.startsWith("127.")) return;
+  if (process.env.SOLOW_DEV_OWNER === "on") {
+    fail(
+      `SOLOW_DEV_OWNER=on with SOLOW_BIND_HOST=${host} would give everyone on the network the Owner's access. Turn one of them off.`,
+    );
+  }
+  console.warn(
+    `solow: WARNING: SOLOW_BIND_HOST=${host} exposes SoloW to the network. Anyone who can reach it can try to sign in; put it behind TLS.`,
+  );
+}
+
+/**
+ * The data folder holds the master key and a database with every session token in it, so nobody
+ * else on the machine may read any of it — the same rule as `scripts/lib/data-dir.sh`.
+ *
+ * Created 0700, and an existing one tightened on every start: an earlier version made it 0755 and
+ * left the database 0644. Only what SoloW put there — the folder, its keys, its database and the
+ * engine's state and backups (copies of both); anything else in it keeps the mode it has. The
+ * process umask (set in `main`) covers what is created later, by the services as well.
+ */
+function prepareDataDir(dataDir) {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dataDir, 0o700);
+  } catch {
+    console.warn(`solow: WARNING: could not make ${dataDir} private (chmod 700)`);
+  }
+  for (const name of readdirSync(dataDir)) {
+    if (/\.(key|secret)$/.test(name) || name === "solow.db" || name.startsWith("solow.db-")) {
+      makePrivate(join(dataDir, name), false);
+    }
+  }
+  makePrivate(join(dataDir, "inngest"), true);
+  makePrivate(join(dataDir, "backups"), true);
+}
+
+/** `chmod go=` on a file, or with `recursive` on a whole tree. Symlinks are left alone. */
+function makePrivate(path, recursive) {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) return;
+    if (stat.isDirectory() && !recursive) return;
+    chmodSync(path, stat.mode & 0o700);
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(path)) makePrivate(join(path, name), true);
+    }
+  } catch {
+    // Missing, or not ours to change: neither is a reason not to start.
+  }
+}
+
 function buildEnv(opts) {
-  mkdirSync(opts.dataDir, { recursive: true });
+  prepareDataDir(opts.dataDir);
   return {
     ...process.env,
     NODE_ENV: "production",
     SOLOW_DB_DRIVER: "sqlite",
     SOLOW_SQLITE_PATH: join(opts.dataDir, "solow.db"),
-    SOLOW_SECRET_KEY: secret(opts.dataDir, "secret.key", () => randomBytes(32).toString("base64")),
-    SOLOW_AUTH_SECRET: secret(opts.dataDir, "auth.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_SECRET_KEY: secret(
+      opts.dataDir,
+      "secret.key",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_SECRET_KEY",
     ),
-    SOLOW_STREAM_SECRET: secret(opts.dataDir, "stream.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_AUTH_SECRET: secret(
+      opts.dataDir,
+      "auth.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_AUTH_SECRET",
+    ),
+    SOLOW_STREAM_SECRET: secret(
+      opts.dataDir,
+      "stream.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_STREAM_SECRET",
     ),
     SOLOW_WORKTREE_ROOT: join(opts.dataDir, "worktrees"),
     SOLOW_REPO_CACHE_ROOT: join(opts.dataDir, "repos"),
+    // Imported Skills. Left unset, the web app put them under whatever directory `npx` ran in.
+    SOLOW_SKILLS_ROOT: join(opts.dataDir, "skills"),
     SOLOW_WS_PORT: String(opts.wsPort),
-    SOLOW_WS_URL: `ws://localhost:${opts.wsPort}`,
-    SOLOW_WEB_URL: `http://localhost:${opts.webPort}`,
-    SOLOW_ORCHESTRATOR_URL: `http://localhost:${opts.wsPort}`,
+    // The two URLs a browser uses. An exported value wins: behind a LAN address or a proxy the
+    // browser's origin is not localhost, and the sign-in check rejects any origin but this one.
+    SOLOW_WS_URL: process.env.SOLOW_WS_URL || `ws://localhost:${opts.wsPort}`,
+    SOLOW_WEB_URL: process.env.SOLOW_WEB_URL || `http://localhost:${opts.webPort}`,
+    SOLOW_ORCHESTRATOR_URL:
+      process.env.SOLOW_ORCHESTRATOR_URL || `http://${internalHost()}:${opts.wsPort}`,
     SOLOW_INNGEST_PORT: String(opts.inngestPort),
-    // Single-user local install: there is one person at this machine and they own it, so the
-    // stack binds them to the local Workspace instead of asking them to invent an account.
-    SOLOW_DEV_OWNER: process.env.SOLOW_DEV_OWNER ?? "on",
+    // Sign-in is on unless the environment says otherwise: a fresh install asks the person for
+    // an Owner account on first visit. The "every visitor is the Owner" stand-in is for
+    // development and is opt-in (SOLOW_DEV_OWNER=on), never inherited as a default.
+    SOLOW_DEV_OWNER: process.env.SOLOW_DEV_OWNER ?? "off",
+    // Loopback unless SOLOW_BIND_HOST names another interface; see bindHost() below.
+    SOLOW_BIND_HOST: bindHost(),
     SOLOW_AGENT_COMMAND: process.env.SOLOW_AGENT_COMMAND ?? "claude",
-    // Inngest's own variable: a URL points the SDK at the local Dev Server below rather than
-    // Inngest Cloud. Spelled out rather than left as "1", which falls back to the SDK's
-    // hardcoded :8288 and silently breaks registration whenever the port is overridden.
-    INNGEST_DEV: `http://localhost:${opts.inngestPort}`,
+    // Web -> orchestrator bearer secret for /events (B3), and the keys that make the self-hosted
+    // engine (`inngest start`) accept only signed requests (F6). Hex because the engine insists.
+    SOLOW_ORCHESTRATOR_SECRET: secret(
+      opts.dataDir,
+      "orchestrator.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_ORCHESTRATOR_SECRET",
+    ),
+    INNGEST_SIGNING_KEY: secret(
+      opts.dataDir,
+      "inngest-signing.key",
+      () => randomBytes(32).toString("hex"),
+      "INNGEST_SIGNING_KEY",
+    ),
+    INNGEST_EVENT_KEY: secret(
+      opts.dataDir,
+      "inngest-event.key",
+      () => randomBytes(32).toString("hex"),
+      "INNGEST_EVENT_KEY",
+    ),
+    // Any INNGEST_DEV (even inherited) would put the SDK in dev mode and skip signature checks;
+    // INNGEST_BASE_URL is what points the non-dev SDK at the local engine instead of Cloud.
+    INNGEST_BASE_URL: `http://${internalHost()}:${opts.inngestPort}`,
+    INNGEST_DEV: undefined,
   };
 }
+
+/**
+ * Set on the engine's process alone, as scripts/lib/engine-env.sh's `supervise_engine` does.
+ * inngest-cli reports its own usage (`cli/command.executed`, then `cli/dev_ui.loaded` in bursts
+ * every minute, with a stored device id) through an embedded SDK client that follows
+ * INNGEST_EVENT_API_BASE_URL, else INNGEST_BASE_URL, else Inngest Cloud, and has no switch to
+ * turn it off (1.46). With INNGEST_BASE_URL it posts them to the engine itself, which rejects
+ * Inngest's key in a log line each; without it they leave the machine. Port 0 cannot be connected
+ * to, so they fail on the spot. Never in `buildEnv`: the orchestrator's SDK reads the same
+ * variable for the events SoloW does send. The update notice is off because the version is the
+ * one this package pins, not the user's to bump.
+ */
+const ENGINE_ONLY_ENV = {
+  INNGEST_EVENT_API_BASE_URL: "http://127.0.0.1:0",
+  INNGEST_NO_UPDATE_NOTIFIER: "1",
+};
 
 // ---------------------------------------------------------------------------- ports
 
@@ -435,11 +591,31 @@ async function waitForPort(p, timeoutMs) {
 
 // ---------------------------------------------------------------------------- run
 
-const children = [];
+/** The running process of each service, replaced on every restart. */
+const children = new Map();
+/** The descriptor the data folder's lock is on (`claimDataDir`), or null without `flock(1)`. */
+let dataDirLock = null;
 let shuttingDown = false;
 
+function envInt(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * The same policy as `scripts/lib/supervise.sh` (FINDINGS F2), and the same variables: a service
+ * that exits is started again after 1s, 2s, 4s… up to 30s, while the other two keep running. The
+ * count resets once a run has lasted a minute; a service that fails five times in a row is broken
+ * rather than unlucky, and only then does the whole stack stop — so a service manager above this
+ * one (docs/operations/running-as-a-service.md) sees the failure instead of a stack half up.
+ */
+const RESTART = {
+  limit: envInt("SOLOW_RESTART_LIMIT", 5),
+  stableMs: envInt("SOLOW_RESTART_STABLE_SECS", 60) * 1000,
+  maxDelayS: envInt("SOLOW_RESTART_MAX_DELAY", 30),
+};
+
 function start(name, bin, args, env, extra = {}) {
-  const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
   const tag = `[${name}]`;
   const relay = (stream, out) => {
     let buffer = "";
@@ -450,24 +626,49 @@ function start(name, bin, args, env, extra = {}) {
       for (const line of lines) out.write(`${tag} ${line}\n`);
     });
   };
-  relay(child.stdout, process.stdout);
-  relay(child.stderr, process.stderr);
-  child.on("exit", (code, signal) => {
-    if (shuttingDown) return;
-    console.error(`\nsolow: ${name} exited (${signal ?? `code ${code}`}) — stopping the rest.`);
-    shutdown(1);
-  });
-  children.push(child);
-  return child;
+  let failures = 0;
+  const launch = () => {
+    const startedAt = Date.now();
+    // The data folder's lock as the child's fd 3, so it is held for as long as any service runs.
+    const stdio = ["ignore", "pipe", "pipe", ...(dataDirLock === null ? [] : [dataDirLock])];
+    const child = spawn(bin, args, { env, stdio, ...extra });
+    relay(child.stdout, process.stdout);
+    relay(child.stderr, process.stderr);
+    child.on("exit", (code, signal) => {
+      if (shuttingDown) return;
+      const how = signal ?? `code ${code}`;
+      if (Date.now() - startedAt >= RESTART.stableMs) failures = 0;
+      failures += 1;
+      if (failures > RESTART.limit) {
+        console.error(
+          `\nsolow: ${name} exited (${how}) ${RESTART.limit} times in a row — stopping the rest.`,
+        );
+        shutdown(1);
+        return;
+      }
+      const delay = Math.min(2 ** (failures - 1), RESTART.maxDelayS);
+      console.error(
+        `\nsolow: ${name} exited (${how}) — restarting in ${delay}s (attempt ${failures} of ${RESTART.limit})`,
+      );
+      setTimeout(() => {
+        if (!shuttingDown) launch();
+      }, delay * 1000);
+    });
+    children.set(name, child);
+  };
+  launch();
 }
 
 function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const child of children) child.kill("SIGTERM");
+  // Set rather than passed only to exit(): if every service is gone before the timer below, Node
+  // ends on its own, and would otherwise report success for a stack that failed.
+  process.exitCode = code;
+  for (const child of children.values()) child.kill("SIGTERM");
   // Give them a moment to close listeners, then make sure the process actually ends.
   setTimeout(() => {
-    for (const child of children) child.kill("SIGKILL");
+    for (const child of children.values()) child.kill("SIGKILL");
     process.exit(code);
   }, 2000).unref();
 }
@@ -486,7 +687,214 @@ function openBrowser(url) {
   }
 }
 
+/**
+ * Marks the data folder as in use while the stack runs (FINDINGS F1). `solow restore` refuses
+ * while it is, and a second `solow` on the same folder refuses to start — two stacks on one SQLite
+ * file and one engine directory would each run the other's Tasks. Same files and same rule as
+ * `scripts/lib/data-dir.sh`.
+ *
+ * The mark is a flock(2) on `solow.lock`. Node cannot take one, so `flock(1)` takes it on a
+ * descriptor this process opened and hands in: the lock belongs to the open file, so it stays
+ * after the helper exits. Each service is then given the same descriptor (`start`), so the folder
+ * stays locked until the last of them is gone, not just this process — a launcher killed outright
+ * leaves its services running, and a pid file naming the launcher could not say so.
+ *
+ * Returns that descriptor, or null where there is no `flock(1)` (macOS) and a pid file is all
+ * there is to go on.
+ */
+function claimDataDir(dataDir) {
+  const lockFd = lockDataDir(dataDir);
+  if (lockFd !== null) {
+    writePidFile(dataDir);
+    return lockFd;
+  }
+  const file = join(dataDir, "solow.pid");
+  if (existsSync(file)) {
+    const pid = Number.parseInt(readFileSync(file, "utf8").trim(), 10);
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && processAlive(pid)) {
+      fail(
+        `SoloW is already running on ${dataDir} (pid ${pid}) — stop it first.\n` +
+          `  If nothing is running, the pid file is stale: remove ${file}`,
+      );
+    }
+  }
+  writePidFile(dataDir);
+  return null;
+}
+
+/**
+ * The data folder's lock alone (see `claimDataDir`): the descriptor it is on, or null where there
+ * is no `flock(1)`. Exits if something else holds it.
+ */
+function lockDataDir(dataDir) {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const lockFile = join(dataDir, "solow.lock");
+  const lockFd = openSync(lockFile, "a", 0o600);
+  const locked = spawnSync("flock", ["-n", "3"], { stdio: ["ignore", "ignore", "pipe", lockFd] });
+  if (locked.error?.code === "ENOENT") {
+    closeSync(lockFd);
+    return null;
+  }
+  if (locked.status !== 0) {
+    fail(
+      `SoloW is already running on ${dataDir} — stop it first.\n` +
+        `  Its processes hold ${lockFile}; \`fuser -v ${lockFile}\` lists them.`,
+    );
+  }
+  return lockFd;
+}
+
+/** For a person looking at the folder, and the check where there is no `flock(1)`. */
+function writePidFile(dataDir) {
+  const file = join(dataDir, "solow.pid");
+  writeFileSync(file, `${process.pid}\n`);
+  process.on("exit", () => {
+    try {
+      if (readFileSync(file, "utf8").trim() === String(process.pid)) unlinkSync(file);
+    } catch {
+      // already gone
+    }
+  });
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+/**
+ * `solow backup` and `solow restore`: the same code as the repo's `scripts/backup.sh`, bundled as
+ * `dist/db/backup.js` and run under the same Bun as the stack. Neither starts anything.
+ */
+function runBackupCommand(command, rest) {
+  const args = [...rest];
+  if (!args.includes("--data-dir")) {
+    args.push("--data-dir", process.env.SOLOW_HOME || join(homedir(), ".solow"));
+  }
+  // A restore replaces the database under anything running on it: refused while a stack holds the
+  // data folder's lock, and holding it until done so that no `solow` starts meanwhile. The lock
+  // goes to the restore as its fd 3, since Bun cannot take one itself. Without a backup named,
+  // `restore` only lists them, which is fine while SoloW runs.
+  const stdio = ["inherit", "inherit", "inherit"];
+  const env = { ...process.env };
+  const at = args.indexOf("--data-dir");
+  const named = rest.some((arg, i) => !arg.startsWith("-") && rest[i - 1] !== "--data-dir");
+  if (command === "restore" && named) {
+    const lockFd = lockDataDir(resolve(args[at + 1] ?? ""));
+    if (lockFd !== null) {
+      stdio.push(lockFd);
+      env.SOLOW_DATA_DIR_LOCKED = "1";
+    }
+  }
+  const result = spawnSync(resolveBun(), [join(DIST, "db", "backup.js"), command, ...args], {
+    stdio,
+    env,
+  });
+  process.exit(result.status ?? 1);
+}
+
+/**
+ * The tag the guided setup looks for — `DEFAULT_EXECUTOR_IMAGE` in `@solow/contracts`, which this
+ * file cannot import, so `launcher-executor-image.test.ts` keeps the two spellings in step.
+ */
+const DEFAULT_EXECUTOR_IMAGE = "solow-executor:local";
+
+/** The package's copy (`scripts/build.ts` puts it in dist/), or the checkout's when run from source. */
+function executorDockerfile() {
+  const candidates = [
+    join(DIST, "executor", "Dockerfile"),
+    join(HERE, "..", "..", "..", "docker", "executor", "Dockerfile"),
+  ];
+  const found = candidates.find((path) => existsSync(path));
+  if (!found) fail(`the executor image's Dockerfile is missing (looked in ${candidates[0]})`);
+  return found;
+}
+
+/**
+ * `solow executor-image`: build the image the Docker executor runs Claude Code and opencode in
+ * (roadmap B4), so the guided setup can put Claude in a container instead of on this machine.
+ *
+ * Here rather than only in the repo's Makefile because the person who needs it most installed
+ * SoloW with npx and has no checkout. The same code serves both: `make executor-image` runs this.
+ * The Dockerfile goes in on stdin with no build context, so nothing from the machine can be copied
+ * into a layer. `SOLOW_EXECUTOR_IMAGE` and `SOLOW_DOCKER_BIN` are the orchestrator's own settings,
+ * read here too, so the tag built is the one the setup asks the daemon for.
+ */
+function runExecutorImageCommand(rest) {
+  let tag = process.env.SOLOW_EXECUTOR_IMAGE || DEFAULT_EXECUTOR_IMAGE;
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === "--tag" && rest[i + 1]) tag = rest[++i];
+    else
+      fail(
+        `unknown option for executor-image: ${rest[i]}\nUsage: solow executor-image [--tag <name>]`,
+      );
+  }
+  const docker = process.env.SOLOW_DOCKER_BIN || "docker";
+
+  console.log(`solow: building ${tag} — Claude Code and opencode, for the Docker executor`);
+  const built = spawnSync(docker, ["build", "--tag", tag, "-"], {
+    input: readFileSync(executorDockerfile()),
+    stdio: ["pipe", "inherit", "inherit"],
+  });
+  if (built.error) {
+    fail(
+      `could not run \`${docker}\` (${built.error.message}).\n` +
+        "  The isolated executor needs Docker on this machine: install it, start it, and re-run.",
+    );
+  }
+  if (built.status !== 0) fail("the image did not build — see the output above.");
+
+  /*
+   * Proved the way a Task will use it, not only built: as this user's uid, with `HOME` a tmpfs —
+   * the two things the driver always imposes (`runArgs` in `executor/docker.ts`). An image whose
+   * harnesses only run as the uid it was built for would pass a plain `docker run` and then fail
+   * every Task, so the check is worth the second it costs.
+   */
+  // `SOLOW_DOCKER_USER` first, as the orchestrator reads it: the uid a Task will actually get.
+  const runAs =
+    process.env.SOLOW_DOCKER_USER || (process.getuid && `${process.getuid()}:${process.getgid()}`);
+  const [uid, gid] = runAs ? runAs.split(":") : [];
+  const user = runAs ? ["--user", runAs] : [];
+  const owner = runAs ? `,uid=${uid},gid=${gid}` : "";
+  const checked = spawnSync(
+    docker,
+    [
+      "run",
+      "--rm",
+      ...user,
+      "--tmpfs",
+      `/home/solow:rw,exec,mode=0700${owner},size=64m`,
+      "--env",
+      "HOME=/home/solow",
+      "--entrypoint",
+      "/bin/sh",
+      tag,
+      "-c",
+      "claude --version && opencode --version",
+    ],
+    { stdio: "inherit" },
+  );
+  if (checked.status !== 0) {
+    fail(`${tag} was built, but its harnesses did not run as this user — see the output above.`);
+  }
+  console.log(
+    `\n  ${tag} is ready. Connect Claude in SoloW's setup (again, if you already did) and new` +
+      "\n  Tasks run in an isolated container on this machine.\n",
+  );
+  process.exit(0);
+}
+
 async function main() {
+  // Before anything is created, and inherited by every service: the database's -wal and -shm, the
+  // engine's files and the backups are written by them, long after this file stopped writing.
+  process.umask(0o077);
+  const [command, ...rest] = process.argv.slice(2);
+  if (command === "backup" || command === "restore") runBackupCommand(command, rest);
+  if (command === "executor-image") runExecutorImageCommand(rest);
   const opts = parseArgs(process.argv.slice(2));
   const bun = resolveBun();
 
@@ -513,11 +921,13 @@ async function main() {
       fail(`port ${p} (${label}) is already in use — free it or pass a different port.`);
     }
   }
+  dataDirLock = claimDataDir(opts.dataDir);
 
   // Migrations run on every start, not just the first: drizzle skips the ones already recorded,
   // so it is cheap, and without it an upgraded `npx solow` would open an old database and 500 on
   // tables that do not exist yet. Seeding stays first-run only.
   const fresh = !existsSync(env.SOLOW_SQLITE_PATH);
+  checkExposure();
   console.log(`solow ${pkg.version}  ·  data ${opts.dataDir}`);
   console.log(fresh ? "initializing database…" : "applying migrations…");
 
@@ -545,22 +955,24 @@ async function main() {
     "inngest",
     resolveInngest(),
     [
-      "dev",
-      "--no-discovery",
-      "--persist",
+      "start",
+      "--sqlite-dir",
+      join(opts.dataDir, "inngest"),
       "-u",
-      `http://localhost:${opts.wsPort}/api/inngest`,
+      `http://${internalHost()}:${opts.wsPort}/api/inngest`,
       "-p",
       String(opts.inngestPort),
+      "--host",
+      bindHost(),
     ],
-    env,
+    { ...env, ...ENGINE_ONLY_ENV },
   );
 
   // Next's standalone server reads its port and host from the environment; it takes no flags.
   start("web", bun, [join(DIST, "web", "apps", "web", "server.js")], {
     ...env,
     PORT: String(opts.webPort),
-    HOSTNAME: "127.0.0.1",
+    HOSTNAME: bindHost(),
   });
 
   const url = `http://localhost:${opts.webPort}`;

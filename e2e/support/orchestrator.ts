@@ -33,6 +33,7 @@ import {
   prepareRepository,
   provisionWorktree,
   publishWorktreeBranch,
+  pushWorktreeBranch,
 } from "../../apps/orchestrator/src/worktree/manager.js";
 import { seedSetupFiles } from "../../apps/orchestrator/src/worktree/setup-files.js";
 import { hub } from "../../apps/orchestrator/src/ws/hub.js";
@@ -306,6 +307,10 @@ function deps(): TaskRunDeps {
       // rather than stubbed, so a future containerised fixture publishes for real.
       publish: (repoPath, upstreamPath, branch) =>
         publishWorktreeBranch(executor, repoPath, upstreamPath, branch),
+      // Every repository the suite seeds is local, so delivery keeps the local commit and never
+      // calls this — wired to the real push so a future forge-backed fixture ships for real.
+      push: (upstreamPath, remoteUrl, branch, credential) =>
+        pushWorktreeBranch(executor, upstreamPath, remoteUrl, branch, credential),
       cleanup: (repoPath, worktree) => cleanupWorktree(executor, repoPath, worktree),
       hasChanges: (path, patterns) => hasChanges(executor, path, patterns),
       // The real capture against the real worktree, so the E2E proves the diff a reviewer sees
@@ -346,6 +351,10 @@ startWebSocketServer(PORTS.ws);
 
 Bun.serve({
   port: PORTS.orchestrator,
+  // Loopback, as the WebSocket server beside it: `/events` launches a Task with no signature
+  // to check, and Bun's default of every interface would offer that to the network while the
+  // suite runs.
+  hostname: "127.0.0.1",
   async fetch(req) {
     const { pathname } = new URL(req.url);
     if (pathname === "/health") return new Response("ok");

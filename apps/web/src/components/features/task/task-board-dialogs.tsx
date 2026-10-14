@@ -31,8 +31,9 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { effectiveGate, GATE_DESCRIPTION, GATE_NAME } from "@/lib/workflow-gates";
 import { trpc } from "@/trpc/react";
-import { HarnessMarkdown } from "./markdown";
+import { HarnessMarkdown } from "./lazy-markdown";
 import { PermissionCard } from "./permission-card";
 import type { BoardColumn } from "./task-board-model";
 import { type DecisionAnswer, DecisionMark, questionText } from "./task-board-nodes";
@@ -463,14 +464,6 @@ const STATUS_WORD: Record<BoardColumn["status"] | "gate", string> = {
   gate: "At the gate",
 };
 
-/** How a Step ends, in the words the Workflow editor uses for its gate. */
-const GATE_WORD: Record<WorkflowStepDto["gate"], string> = {
-  human: "A person approves it",
-  auto: "It moves on by itself",
-  "auto-unless-changes": "It moves on by itself, unless it changed files",
-  "agent-decides": "The AI decides: a person reviews it unless the harness says REVIEW: no",
-};
-
 /**
  * A Step, opened from its header: what it is told to do, how it ends, and the way to read it —
  * the board scoped to its cards (the strip's tab for it).
@@ -521,11 +514,16 @@ export function StepBody({
         </dd>
         {step ? (
           <>
-            <dt className="text-muted-foreground">Ends when</dt>
-            <dd>{GATE_WORD[step.gate]}</dd>
+            <dt className="text-muted-foreground">Review</dt>
+            <dd>
+              {GATE_NAME[effectiveGate(step)]}
+              <span className="block text-muted-foreground text-xs">
+                {GATE_DESCRIPTION[effectiveGate(step)]}
+              </span>
+            </dd>
           </>
         ) : null}
-        <dt className="text-muted-foreground">On the board</dt>
+        <dt className="text-muted-foreground">On this step</dt>
         <dd>{parts.length === 0 ? "Nothing yet" : parts.join(" · ")}</dd>
       </dl>
       {step?.promptTemplate ? (
@@ -541,7 +539,7 @@ export function StepBody({
       <div className="flex flex-wrap gap-2">
         {step ? (
           <Button variant="outline" size="sm" onClick={onShowOnBoard}>
-            <Focus aria-hidden /> Show this step on the board
+            <Focus aria-hidden /> Show in Steps
           </Button>
         ) : null}
         {step && onForceReview ? (

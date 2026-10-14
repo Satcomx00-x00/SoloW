@@ -1,4 +1,8 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { orchestratorSecretProblem, readOrchestratorSecret } from "@solow/contracts";
+import { createLogger } from "@solow/observability";
 import { z } from "zod";
+import { orchestratorEnv } from "../env.js";
 import { inngest } from "./client.js";
 
 /**
@@ -24,10 +28,31 @@ const eventEnvelopeSchema = z.object({
  */
 export interface EventPostDeps {
   send: (payload: { name: string; data: Record<string, unknown> }) => Promise<unknown>;
+  /**
+   * The secret the web app must present as `Authorization: Bearer <secret>`, as configured.
+   * Unset, or failing the shared rule (`readOrchestratorSecret`), and the route refuses
+   * everything with a 503: an open `/events` lets anyone who can reach the port start a run
+   * (FINDINGS B3).
+   */
+  secret?: string | undefined;
 }
 
 function defaultEventPostDeps(): EventPostDeps {
-  return { send: (payload) => inngest.send(payload) };
+  return {
+    send: (payload) => inngest.send(payload),
+    secret: orchestratorEnv().SOLOW_ORCHESTRATOR_SECRET,
+  };
+}
+
+/** Said once per process: the 503 repeats on every request, the log line need not. */
+let secretProblemLogged = false;
+
+/** Constant-time compare, so the secret cannot be recovered a byte at a time from response timing. */
+function bearerMatches(header: string | null, secret: string): boolean {
+  const presented = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(secret).digest();
+  return timingSafeEqual(a, b);
 }
 
 /**
@@ -41,6 +66,23 @@ export async function handleEventPost(
   req: Request,
   deps: EventPostDeps = defaultEventPostDeps(),
 ): Promise<Response> {
+  const configured = readOrchestratorSecret(deps.secret);
+  if (!configured.ok) {
+    const reason = orchestratorSecretProblem(configured.problem);
+    if (!secretProblemLogged) {
+      secretProblemLogged = true;
+      createLogger({ service: "orchestrator" }).error(
+        `POST /events refuses every request: ${reason}. Runs cannot be started until it is set.`,
+      );
+    }
+    // The caller is not authenticated yet, so it learns only that the route is closed; the rule
+    // the secret broke is in the log above, for the operator.
+    return new Response("not accepting events", { status: 503 });
+  }
+  if (!bearerMatches(req.headers.get("authorization"), configured.secret)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();

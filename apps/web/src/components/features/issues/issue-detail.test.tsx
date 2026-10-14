@@ -131,6 +131,19 @@ describe("IssueDetail", () => {
     await screen.findByRole("button", { name: "Blocked by 1 task" });
   });
 
+  it("says a missing issue is gone, in words, and offers the way back", async () => {
+    renderWithTrpc(<IssueDetail issueId="gone" />, {
+      "issue.get": () => {
+        throw new Error("NOT_FOUND");
+      },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This issue no longer exists");
+    expect(alert.textContent).not.toContain("NOT_FOUND");
+    expect(screen.getByRole("link", { name: /Back to/ })).toBeTruthy();
+  });
+
   it("says so when the edges cannot be loaded", async () => {
     renderWithTrpc(<IssueDetail issueId={issue.id} />, {
       "issue.get": () => issue,
@@ -140,7 +153,9 @@ describe("IssueDetail", () => {
       },
     });
 
-    expect((await screen.findByRole("alert")).textContent).toContain("edges unavailable");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Tasks not available");
+    expect(alert.textContent).not.toContain("edges unavailable");
     expect(screen.queryByText("Wire the latch")).toBeNull();
   });
 });

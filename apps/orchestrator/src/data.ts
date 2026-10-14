@@ -6,6 +6,7 @@ import type {
   TaskState,
 } from "@solow/contracts";
 import { parseSessionEventPayload, sessionEventPayloadSchema } from "@solow/contracts";
+import { DELIVERY_FAILED_REASON } from "@solow/core";
 import {
   type CompactionRange,
   planCompaction,
@@ -61,7 +62,7 @@ export interface TaskRepositoryBinding {
    * — this module reads rows, and a plaintext token on a context object would be one more place
    * it could be logged from (Principle IV).
    */
-  scmClone: { provider: ScmProvider; secretCiphertext: string } | null;
+  scmClone: { provider: ScmProvider; secretCiphertext: string; baseUrl: string | null } | null;
 }
 
 export interface TaskRunContext {
@@ -155,35 +156,7 @@ export async function loadTaskRunContext(
     .limit(1);
   if (!ep) throw new Error(`executor profile ${t.executorProfileId} not found`);
 
-  // Ordered by position, so index 0 is the primary attachment and `primaryTaskRepository` and
-  // this list agree about which worktree the harness is started in (issue #7).
-  const attachments = await db
-    .select({ attachment: taskRepository, repository })
-    .from(taskRepository)
-    .innerJoin(repository, eq(repository.id, taskRepository.repositoryId))
-    .where(
-      and(
-        eq(taskRepository.workspaceId, workspaceId),
-        eq(taskRepository.taskId, taskId),
-        eq(repository.workspaceId, workspaceId),
-      ),
-    )
-    .orderBy(asc(taskRepository.position));
-  // A Task with no attachment cannot be run at all, and every write path creates one with the
-  // Task itself. Refused here, by name, rather than letting an index return undefined and the
-  // failure surface three steps later as "cannot read property location of undefined".
-  if (attachments.length === 0) {
-    throw new Error(`task ${taskId} has no repository attached`);
-  }
-
-  const repositories: TaskRepositoryBinding[] = [];
-  for (const row of attachments) {
-    repositories.push({
-      attachment: row.attachment,
-      repository: row.repository,
-      scmClone: await loadScmClone(db, workspaceId, row.repository),
-    });
-  }
+  const repositories = await loadRepositoryBindings(db, workspaceId, taskId);
 
   const [ws] = await db
     .select({ flags: workspace.enabledFlags })
@@ -233,6 +206,89 @@ export async function loadTaskRunContext(
   };
 }
 
+/** A Task's attachments in position order, each with its Repository and clone credential. */
+async function loadRepositoryBindings(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<TaskRepositoryBinding[]> {
+  // Ordered by position, so index 0 is the primary attachment and `primaryTaskRepository` and
+  // this list agree about which worktree the harness is started in (issue #7).
+  const attachments = await db
+    .select({ attachment: taskRepository, repository })
+    .from(taskRepository)
+    .innerJoin(repository, eq(repository.id, taskRepository.repositoryId))
+    .where(
+      and(
+        eq(taskRepository.workspaceId, workspaceId),
+        eq(taskRepository.taskId, taskId),
+        eq(repository.workspaceId, workspaceId),
+      ),
+    )
+    .orderBy(asc(taskRepository.position));
+  // A Task with no attachment cannot be run at all, and every write path creates one with the
+  // Task itself. Refused here, by name, rather than letting an index return undefined and the
+  // failure surface three steps later as "cannot read property location of undefined".
+  if (attachments.length === 0) {
+    throw new Error(`task ${taskId} has no repository attached`);
+  }
+
+  const repositories: TaskRepositoryBinding[] = [];
+  for (const row of attachments) {
+    repositories.push({
+      attachment: row.attachment,
+      repository: row.repository,
+      scmClone: await loadScmClone(db, workspaceId, row.repository),
+    });
+  }
+  return repositories;
+}
+
+/**
+ * What shipping an approved Task again needs (A1), and no more: the Task, its Issue (the
+ * request's title and body), its attachments with their credentials, and the Session its log
+ * goes on. Not `loadTaskRunContext`, which also requires a Harness and an Executor Profile a push
+ * has no use for: a Profile deleted since the approval must not make the branch unshippable.
+ */
+export interface TaskDeliveryContext {
+  task: typeof task.$inferSelect;
+  issue: typeof issue.$inferSelect;
+  repositories: TaskRepositoryBinding[];
+  /** The newest Session, where the approval's own notices already are; null if none exists. */
+  sessionId: string | null;
+}
+
+export async function loadTaskDeliveryContext(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<TaskDeliveryContext | null> {
+  const [t] = await db
+    .select()
+    .from(task)
+    .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)))
+    .limit(1);
+  if (!t) return null;
+  const [iss] = await db
+    .select()
+    .from(issue)
+    .where(and(eq(issue.workspaceId, workspaceId), eq(issue.id, t.issueId)))
+    .limit(1);
+  if (!iss) return null;
+  const [newest] = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.taskId, taskId)))
+    .orderBy(desc(session.startedAt))
+    .limit(1);
+  return {
+    task: t,
+    issue: iss,
+    repositories: await loadRepositoryBindings(db, workspaceId, taskId),
+    sessionId: newest?.id ?? null,
+  };
+}
+
 /**
  * The credential for cloning an imported Repository, if it is one.
  *
@@ -246,11 +302,15 @@ async function loadScmClone(
   db: Db,
   workspaceId: string,
   repo: typeof repository.$inferSelect,
-): Promise<{ provider: ScmProvider; secretCiphertext: string } | null> {
+): Promise<{ provider: ScmProvider; secretCiphertext: string; baseUrl: string | null } | null> {
   if (repo.source !== "remote_url" || !repo.integrationId) return null;
 
   const [row] = await db
-    .select({ provider: integration.provider, ciphertext: secret.ciphertext })
+    .select({
+      provider: integration.provider,
+      baseUrl: integration.baseUrl,
+      ciphertext: secret.ciphertext,
+    })
     .from(integration)
     .innerJoin(secret, eq(secret.id, integration.secretId))
     .where(
@@ -261,7 +321,9 @@ async function loadScmClone(
       ),
     )
     .limit(1);
-  return row ? { provider: row.provider, secretCiphertext: row.ciphertext } : null;
+  return row
+    ? { provider: row.provider, secretCiphertext: row.ciphertext, baseUrl: row.baseUrl }
+    : null;
 }
 
 export async function setTaskState(
@@ -279,6 +341,35 @@ export async function setTaskState(
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * Move an approval that was waiting to ship (`failed` + `delivery_failed`) to `done`, or answer
+ * false when the Task is no longer waiting.
+ *
+ * One conditional write rather than `setTaskState`: Ship again checks the Task before its pushes,
+ * and a Retry can claim the Task into `running` while they are in flight. An unconditional write
+ * here would mark that running Task done under its own harness.
+ */
+export async function finishRedelivery(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<boolean> {
+  const moved = await db
+    .update(task)
+    .set({ state: "done", failureReason: null, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(task.workspaceId, workspaceId),
+        eq(task.id, taskId),
+        eq(task.state, "failed"),
+        eq(task.failureReason, DELIVERY_FAILED_REASON),
+        isNull(task.deletedAt),
+      ),
+    )
+    .returning({ id: task.id });
+  return moved.length > 0;
 }
 
 /**
@@ -322,6 +413,28 @@ export async function setTaskRepositoryResultBranch(
   await db
     .update(taskRepository)
     .set({ resultBranch, updatedAt: new Date().toISOString() })
+    .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
+}
+
+/**
+ * Record the pull or merge request approval opened for an attachment's result branch (A1).
+ *
+ * Idempotent by construction: a redelivered approval finds the same open request and writes the
+ * same url, so the replay changes nothing. Null clears it, for an approval that did not ship.
+ */
+export async function setTaskRepositoryChangeRequest(
+  db: Db,
+  workspaceId: string,
+  attachmentId: string,
+  changeRequest: { url: string; number: number } | null,
+): Promise<void> {
+  await db
+    .update(taskRepository)
+    .set({
+      changeRequestUrl: changeRequest?.url ?? null,
+      changeRequestNumber: changeRequest?.number ?? null,
+      updatedAt: new Date().toISOString(),
+    })
     .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
 }
 
@@ -615,6 +728,27 @@ export async function loadHarnessProbeContext(
     .limit(1);
 
   return { harnessProfile: ap, harnessCatalog: cat, secretCiphertext: sec?.ciphertext ?? null };
+}
+
+/**
+ * One Executor Profile, Workspace-scoped — the executor a probe was asked to run in (the guided
+ * setup's test, roadmap B4). An id from another tenant reads as absent, never as someone else's
+ * execution host (Principle V): a probe that could be pointed at a stranger's profile would run
+ * this Workspace's credential under that profile's image, mounts and environment.
+ */
+export async function loadExecutorProfile(
+  db: Db,
+  workspaceId: string,
+  executorProfileId: string,
+): Promise<typeof executorProfile.$inferSelect | null> {
+  const [ep] = await db
+    .select()
+    .from(executorProfile)
+    .where(
+      and(eq(executorProfile.workspaceId, workspaceId), eq(executorProfile.id, executorProfileId)),
+    )
+    .limit(1);
+  return ep ?? null;
 }
 
 /**

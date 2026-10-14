@@ -6,6 +6,7 @@ import { ChevronRight, ExternalLink, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { type UseFormReturn, useForm } from "react-hook-form";
 import { z } from "zod";
+import { HostRunWarning } from "@/components/features/host-run-warning";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, issueSourceLabel } from "@/lib/issue-status";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
@@ -207,16 +209,24 @@ export function CreateTaskDialog({
   // Unfiltered — used only to decide whether the Workspace has *any* Issue at all (the
   // "missingConfig" gate below). The picker itself reads from `issues` (filtered), so a
   // Repository with zero Issues narrows the picker to empty without hiding the whole form.
-  const allIssues = trpc.issue.list.useQuery({ ...WHOLE_PAGE });
-  const harnesses = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
-  const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
-  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
+  //
+  // Every read here waits for the dialog to open. Its callers keep it mounted while closed — the
+  // board renders it on every load, the Issue page too — and each read used to go out then, for a
+  // form most visits never open. Most are the same lists the page already holds, so opening
+  // answers from the cache; the two that are only the form's own cost a round trip on open.
+  const allIssues = trpc.issue.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const harnesses = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
   /*
    * The Harness Profile and Executor a new Task starts with (spec F16). `retry: false` because
    * this is a convenience behind its own feature flag: a Workspace that has not turned it on
    * must get a form that opens empty, not one that retries a forbidden read before giving up.
    */
-  const taskDefaults = trpc.preference.getTaskDefaults.useQuery({}, { retry: false });
+  const taskDefaults = trpc.preference.getTaskDefaults.useQuery(
+    {},
+    { enabled: open, retry: false },
+  );
 
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
@@ -254,6 +264,7 @@ export function CreateTaskDialog({
   const repositoryId = form.watch("repositoryId");
   const issues = trpc.issue.list.useQuery(
     repositoryId ? { ...WHOLE_PAGE, repositoryId } : WHOLE_PAGE,
+    { enabled: open },
   );
   // `issue.list` already carries the body, the labels and the status — the same `issueDto` the
   // detail page reads — so showing the whole Issue costs no extra request.
@@ -268,11 +279,15 @@ export function CreateTaskDialog({
     },
   });
 
+  // Not yet known is not missing: until the four reads answer, the form says it is loading rather
+  // than telling the operator to go and configure what may well be configured.
+  const configLoading = [allIssues, harnesses, executors, repos].some((q) => q.isPending);
   const missingConfig =
-    (allIssues.data?.items.length ?? 0) === 0 ||
-    (harnesses.data?.items.length ?? 0) === 0 ||
-    (executors.data?.items.length ?? 0) === 0 ||
-    (repos.data?.items.length ?? 0) === 0;
+    !configLoading &&
+    ((allIssues.data?.items.length ?? 0) === 0 ||
+      (harnesses.data?.items.length ?? 0) === 0 ||
+      (executors.data?.items.length ?? 0) === 0 ||
+      (repos.data?.items.length ?? 0) === 0);
 
   /**
    * What the form starts as, once the server has said: the Task named after its Issue, and the
@@ -312,7 +327,7 @@ export function CreateTaskDialog({
   const currentHarness = form.watch("agentProfileId");
   const currentExecutor = form.watch("executorProfileId");
   useEffect(() => {
-    if (!open || missingConfig) return;
+    if (!open || configLoading || missingConfig) return;
     const seed = (name: keyof TaskFormValues, current: string, value: string | undefined) => {
       if (!value || current) return;
       if (form.getFieldState(name).isDirty) return;
@@ -330,7 +345,10 @@ export function CreateTaskDialog({
     seed(
       "executorProfileId",
       currentExecutor,
-      inList(storedDefaults?.executorProfileId, executors.data?.items ?? []),
+      // No saved default: the container if the Workspace has one (roadmap B4). Isolation is what a
+      // Task starts as; running on the host is a pick the Owner makes in front of the warning.
+      inList(storedDefaults?.executorProfileId, executors.data?.items ?? []) ??
+        (executors.data?.items ?? []).find((x) => x.kind === "docker")?.id,
     );
   });
 
@@ -392,7 +410,9 @@ export function CreateTaskDialog({
             Assign a harness, executor, and repository to run a task.
           </DialogDescription>
         </DialogHeader>
-        {missingConfig ? (
+        {configLoading ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : missingConfig ? (
           <p className="text-muted-foreground text-sm">
             {(allIssues.data?.items.length ?? 0) === 0 ? (
               /* This used to send people to the header's Create menu, which had both "New issue"
@@ -493,6 +513,12 @@ export function CreateTaskDialog({
                     (executors.data?.items ?? []).map((x) => ({ id: x.id, label: x.name })),
                   )}
                 </div>
+                <HostRunWarning
+                  executorKind={executors.data?.items.find((x) => x.id === currentExecutor)?.kind}
+                  permissionMode={
+                    harnesses.data?.items.find((h) => h.id === currentHarness)?.permissionMode
+                  }
+                />
                 {/*
                   The two escape hatches, folded away.
 
@@ -576,7 +602,7 @@ export function CreateTaskDialog({
 
                 {create.error && (
                   <p className="text-destructive text-sm" role="alert">
-                    {create.error.message}
+                    {describeError(create.error)}
                   </p>
                 )}
               </DialogBody>

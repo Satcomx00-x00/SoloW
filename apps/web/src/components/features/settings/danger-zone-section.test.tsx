@@ -115,7 +115,7 @@ describe("the reset section", () => {
     renderWithTrpc(<DangerZoneSection />, {
       ...HANDLERS,
       "workspace.reset": () => {
-        throw new Error("Too many resets — try again in an hour");
+        throw new Error("TOO_MANY_REQUESTS");
       },
     });
     const dialog = await openDialog("Reset work data");
@@ -123,7 +123,7 @@ describe("the reset section", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "Reset work data" }));
 
-    expect((await dialog.findByRole("alert")).textContent).toContain("Too many resets");
+    expect((await dialog.findByRole("alert")).textContent).toContain("Wait a moment and try again");
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(screen.queryByText(/Removed \d+ rows/)).toBeNull();
   });

@@ -3,7 +3,7 @@
 import type { RepositoryLabelDto } from "@solow/contracts";
 import { Bold, Code, Heading, Italic, Link2, List, ListChecks, Quote } from "lucide-react";
 import { useRef } from "react";
-import { HarnessMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/lazy-markdown";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";

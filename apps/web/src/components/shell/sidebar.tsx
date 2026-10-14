@@ -246,7 +246,7 @@ const RESIZE_STEP = 16;
  */
 function ResizeHandle() {
   const handle = useSidebar();
-  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+  const drag = useRef<{ startX: number; startWidth: number; last: number } | null>(null);
   if (!handle) return null;
   const { width, setWidth } = handle;
 
@@ -265,15 +265,31 @@ function ResizeHandle() {
       onPointerDown={(e) => {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        drag.current = { startX: e.clientX, startWidth: width };
+        drag.current = { startX: e.clientX, startWidth: width, last: width };
       }}
+      /*
+       * The drag moves the `<aside>` itself, not the state. The width lives in the shell's context,
+       * so a state write per pointer move re-rendered the sidebar and every group and link in the
+       * nav under it, dozens of times a second, to move one edge. React hears about the width once,
+       * when the drag ends — and writes the same value the element already has.
+       */
       onPointerMove={(e) => {
         if (!drag.current) return;
-        setWidth(drag.current.startWidth + e.clientX - drag.current.startX, false);
+        const next = clampSidebarWidth(drag.current.startWidth + e.clientX - drag.current.startX);
+        drag.current.last = next;
+        const aside = e.currentTarget.parentElement;
+        if (aside) aside.style.width = `${next}px`;
+        e.currentTarget.setAttribute("aria-valuenow", String(next));
       }}
       onPointerUp={(e) => {
         if (!drag.current) return;
         setWidth(drag.current.startWidth + e.clientX - drag.current.startX, true);
+        drag.current = null;
+      }}
+      // A cancelled pointer (a touch turned into a scroll, a lost capture) keeps where it got to.
+      onPointerCancel={() => {
+        if (!drag.current) return;
+        setWidth(drag.current.last, true);
         drag.current = null;
       }}
       onDoubleClick={() => setWidth(SIDEBAR_DEFAULT_WIDTH, true)}

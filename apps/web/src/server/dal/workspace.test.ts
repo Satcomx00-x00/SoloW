@@ -1,33 +1,24 @@
 /// <reference types="bun-types" />
 import { beforeEach, describe, expect, it } from "bun:test";
-import {
-  encryptSecret,
-  executorProfile,
-  harnessCatalog,
-  integration,
-  repository,
-  secret,
-  workspace,
-} from "@solow/db";
+import { encryptSecret, integration, repository, secret, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
-import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
+import { ctxFor } from "./test-fixtures.js";
 import {
+  getHistoryRetention,
   getSyncStatus,
   getWorkspace,
   getWorkspaceFlags,
-  getWorkspaceSetup,
+  previewHistoryRetention,
   renameWorkspace,
+  setHistoryRetention,
 } from "./workspace.js";
 
 /**
  * The Workspace, as something an Owner can read and act on (2026-08-28).
  *
- * The setup state is the part worth pinning hardest, because it replaced a fixture that lied.
- * A local install used to arrive holding two invented companies, each with a credential, an
- * Harness Profile, an Executor and a repository that never existed — so the product looked
- * configured on first launch and the real gap stayed hidden. Everything below is about the
- * checklist telling the truth about rows that are actually there.
+ * Its setup state — the part that replaced a fixture that lied — is pinned in `setup.test.ts`,
+ * beside the guided setup that now owns it.
  */
 
 let db: TestDb;
@@ -42,15 +33,6 @@ async function bareWorkspace(name = "Bare") {
   if (!ws) throw new Error("failed to insert workspace");
   return ws.id;
 }
-
-const stepsOf = async (workspaceId: string) => {
-  const result = await getWorkspaceSetup(ctxFor(db, workspaceId));
-  if (!result.ok) throw new Error(`setup failed: ${result.error}`);
-  return result.data;
-};
-
-const step = (data: Awaited<ReturnType<typeof stepsOf>>, key: string) =>
-  data.steps.find((s) => s.key === key);
 
 describe("getWorkspace", () => {
   it("reads the caller's own Workspace", async () => {
@@ -84,143 +66,6 @@ describe("renameWorkspace", () => {
     expect(result.ok && result.data.name).toBe("After");
     const [other] = await db.select().from(workspace).where(eq(workspace.id, theirs));
     expect(other?.name).toBe("Untouched");
-  });
-});
-
-describe("getWorkspaceSetup", () => {
-  it("reports a bare Workspace as unready, naming what it lacks", async () => {
-    // The state a real sign-up leaves behind, and the one the retired fixture hid: no
-    // credential, no profile, no executor, no repository. The core loop is *not* among them any
-    // more — flags default ON (constitution v1.5.0), so a fresh Workspace arrives with that step
-    // already done and what it lacks is only ever rows somebody has to create.
-    const id = await bareWorkspace();
-
-    const data = await stepsOf(id);
-
-    expect(data.ready).toBe(false);
-    expect(step(data, "workspace")?.done).toBe(true);
-    expect(step(data, "core-loop")?.done).toBe(true);
-    for (const key of ["agents", "secret", "agent-profile", "executor", "repository"]) {
-      expect(step(data, key)?.done).toBe(false);
-    }
-  });
-
-  it("says a Harness Profile is waiting on a credential rather than offering a dead action", async () => {
-    // A Profile binds a harness to a Secret, so a form opened before one exists has an empty
-    // picker. Naming the missing thing is a better answer than a button that cannot work.
-    const id = await bareWorkspace();
-
-    const data = await stepsOf(id);
-
-    expect(step(data, "agent-profile")?.blockedBy).toBe("secret");
-  });
-
-  it("stops blocking the Profile step once a credential exists", async () => {
-    const id = await bareWorkspace();
-    await db.insert(secret).values({
-      workspaceId: id,
-      name: "token",
-      kind: "api_key",
-      ciphertext: "cipher",
-    });
-
-    const data = await stepsOf(id);
-
-    expect(step(data, "secret")?.done).toBe(true);
-    expect(step(data, "secret")?.detail).toBe("1 secret");
-    expect(step(data, "agent-profile")?.blockedBy).toBeNull();
-  });
-
-  it("counts what exists, in words rather than as a bare number", async () => {
-    const id = await bareWorkspace();
-    await db.insert(repository).values([
-      { workspaceId: id, name: "one", source: "local_path", location: "/tmp/one" },
-      { workspaceId: id, name: "two", source: "local_path", location: "/tmp/two" },
-    ]);
-
-    const data = await stepsOf(id);
-
-    // "repositories", not "repositorys" — the plural is given, not guessed from the singular.
-    expect(step(data, "repository")?.detail).toBe("2 repositories");
-  });
-
-  it("is ready only when every step is, including the flag the core loop hides behind", async () => {
-    /*
-     * `ff-core-program` defaults ON now, so the direction of this test is reversed: it used to
-     * prove a fully-configured Workspace stays unready until the flag is switched on, and it
-     * proves the same coupling from the other side — a fully-configured Workspace goes *back* to
-     * unready the moment somebody kills that flag. The step exists for the kill switch, which is
-     * the case where a Workspace has everything and still refuses to run a Task.
-     */
-    const graph = await seedWorkspaceGraph(db, "full");
-    await db.insert(secret).values({
-      workspaceId: graph.workspaceId,
-      name: "token",
-      kind: "api_key",
-      ciphertext: "cipher",
-    });
-
-    const before = await stepsOf(graph.workspaceId);
-    expect(step(before, "core-loop")?.done).toBe(true);
-    expect(before.ready).toBe(true);
-
-    await db
-      .update(workspace)
-      .set({ enabledFlags: { "ff-core-program": false } })
-      .where(eq(workspace.id, graph.workspaceId));
-
-    const after = await stepsOf(graph.workspaceId);
-    expect(step(after, "core-loop")?.done).toBe(false);
-    expect(after.ready).toBe(false);
-  });
-
-  it("goes back to unready when something it counted is deleted", async () => {
-    /*
-     * Why this is derived rather than a stored "completed" flag. A checklist that remembered
-     * being finished would keep saying so after the Executor it counted was removed — which is
-     * the moment somebody most needs to be told otherwise.
-     */
-    const graph = await seedWorkspaceGraph(db, "full");
-    await db.insert(secret).values({
-      workspaceId: graph.workspaceId,
-      name: "token",
-      kind: "api_key",
-      ciphertext: "cipher",
-    });
-    // No flag write: it defaults ON, so a Workspace with every row is ready as it stands.
-    expect((await stepsOf(graph.workspaceId)).ready).toBe(true);
-
-    await db.delete(executorProfile).where(eq(executorProfile.workspaceId, graph.workspaceId));
-
-    const after = await stepsOf(graph.workspaceId);
-    expect(after.ready).toBe(false);
-    expect(step(after, "executor")?.done).toBe(false);
-  });
-
-  it("counts only the caller's own rows", async () => {
-    // A neighbour's Secret must never satisfy this Workspace's checklist.
-    const mine = await bareWorkspace("Mine");
-    const theirs = await bareWorkspace("Theirs");
-    await db.insert(secret).values({
-      workspaceId: theirs,
-      name: "not-mine",
-      kind: "api_key",
-      ciphertext: "cipher",
-    });
-    await db.insert(harnessCatalog).values({
-      workspaceId: theirs,
-      key: "claude_code",
-      displayName: "Claude Code",
-      protocol: "claude_code_stream_json",
-      command: "claude",
-      subscriptionEnvVar: "SUB",
-      meteredEnvVar: "API",
-    });
-
-    const data = await stepsOf(mine);
-
-    expect(step(data, "secret")?.done).toBe(false);
-    expect(step(data, "agents")?.done).toBe(false);
   });
 });
 
@@ -416,5 +261,64 @@ describe("getWorkspaceFlags", () => {
 
   it("reads a Workspace that does not exist as no overrides", async () => {
     expect(await getWorkspaceFlags(db, "no-such-workspace")).toEqual({});
+  });
+});
+
+describe("history retention (Decision 0032)", () => {
+  it("starts at the default window, and stores a new one or forever for this Workspace only", async () => {
+    const mine = await bareWorkspace("Mine");
+    const theirs = await bareWorkspace("Theirs");
+
+    const initial = await getHistoryRetention(ctxFor(db, mine));
+    expect(initial.ok && initial.data).toEqual({
+      days: 30,
+      notice: false,
+      defaultDays: 30,
+      options: [7, 30, 90, 365],
+    });
+
+    const forever = await setHistoryRetention(ctxFor(db, mine), { days: null });
+    expect(forever.ok && forever.data.days).toBeNull();
+    const week = await setHistoryRetention(ctxFor(db, theirs), { days: 7 });
+    expect(week.ok && week.data.days).toBe(7);
+
+    const reread = await getHistoryRetention(ctxFor(db, mine));
+    expect(reread.ok && reread.data.days).toBeNull();
+  });
+
+  it("asks an upgraded Workspace to choose, and stops asking once anything is saved", async () => {
+    // What migration 0049 leaves an existing Workspace with: everything kept, and a question.
+    const id = await bareWorkspace();
+    await db
+      .update(workspace)
+      .set({ historyRetentionDays: null, historyRetentionNotice: true })
+      .where(eq(workspace.id, id));
+
+    const asked = await getHistoryRetention(ctxFor(db, id));
+    expect(asked.ok && asked.data).toMatchObject({ days: null, notice: true });
+
+    // Keeping forever is a choice too: saved, it answers the question without changing the window.
+    const kept = await setHistoryRetention(ctxFor(db, id), { days: null });
+    expect(kept.ok && kept.data).toMatchObject({ days: null, notice: false });
+  });
+
+  it("reads a hand-written value outside the offered windows as the default", async () => {
+    const id = await bareWorkspace();
+    await db.update(workspace).set({ historyRetentionDays: 12 }).where(eq(workspace.id, id));
+
+    const result = await getHistoryRetention(ctxFor(db, id));
+    expect(result.ok && result.data.days).toBe(30);
+  });
+
+  it("previews nothing for a Workspace with no finished work", async () => {
+    const id = await bareWorkspace();
+
+    const result = await previewHistoryRetention(ctxFor(db, id), { days: 7 });
+    expect(result.ok && result.data).toEqual({
+      tasks: 0,
+      sessions: 0,
+      events: 0,
+      diffs: 0,
+    });
   });
 });

@@ -201,6 +201,30 @@ describe("review.decide", () => {
     expect(await db.select().from(reviewTable)).toHaveLength(0);
   });
 
+  it("puts back what the harness declared when a request for changes cannot be started", async () => {
+    // Its claim takes a cap slot, and taking one clears `completed_at` (`claimTaskRunSlot`).
+    wired = wireOrchestrator(500);
+    const fx = await gateFixture(db);
+    const completedAt = new Date().toISOString();
+    await db
+      .update(taskTable)
+      .set({ completedAt, completedOutcome: "changes_ready", completedSummary: "done" })
+      .where(eq(taskTable.id, fx.taskId));
+
+    await expect(
+      caller(db, fx.workspaceId).review.decide({
+        sessionId: fx.sessionId,
+        decision: "request_changes",
+        feedback: "again",
+      }),
+    ).rejects.toThrow();
+
+    const [row] = await db.select().from(taskTable).where(eq(taskTable.id, fx.taskId));
+    expect(row?.state).toBe("review");
+    expect(row?.completedAt).toBe(completedAt);
+    expect(row?.completedOutcome).toBe("changes_ready");
+  });
+
   it("applies a decision on a gate an older build declared dead", async () => {
     // `review_decision_not_applied` named a run lost at its `waitForEvent`. There is no run to
     // lose any more, so the decision simply starts one.

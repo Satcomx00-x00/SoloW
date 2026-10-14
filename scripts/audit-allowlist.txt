@@ -4,46 +4,6 @@
 # be reached from a deployed SoloW surface — never merely because fixing it is awkward.
 # Every entry states what makes it unreachable and what would make it reachable again.
 #
-# Reviewed: 2026-08-18. Re-check whenever `bun audit` output changes or a listed assumption
-# below stops holding.
-
-# --- h3 (via inngest, trpc-to-openapi) -------------------------------------------------------
-# Both advisories are in h3's `serveStatic` and `EventStream` handlers. SoloW mounts no
-# h3 server: `trpc-to-openapi` is used for schema generation only (scripts/gen-openapi.ts), and
-# the Inngest `serve` HTTP handler is not wired yet.
-# REACHABLE AGAIN once the Inngest serve endpoint lands (TASK-019 follow-up) — upgrade h3 then.
-1115161  # h3: SSE injection via unsanitized newlines
-1116543  # h3 v1: request smuggling (TE.TE)
-
-# --- postcss (via next, @tailwindcss/postcss) ------------------------------------------------
-# Build-time CSS processing only. Both advisories require processing attacker-supplied CSS or
-# source maps; the only CSS compiled is this repository's own, at build time.
-1124252  # postcss: arbitrary file read via sourceMappingURL
-1139510  # postcss: path traversal in previous-source-map auto-loading
-
-# --- sharp (via next) ------------------------------------------------------------------------
-# Next.js loads sharp lazily for `next/image` optimization. The SPA renders no <Image> and
-# defines no remote image patterns, so the optimizer never runs.
-# REACHABLE AGAIN the moment `next/image` is used — upgrade next/sharp before adding one.
-1124066  # sharp: inherited libvips CVEs
-
-# --- vite / vitest (dev and transitive test tooling) -----------------------------------------
-# Neither is used by SoloW: tests run on `bun test`. They arrive transitively (better-auth
-# ships them in its dependency tree) and never ship in a build output. The vitest advisory
-# additionally requires its UI server to be listening, which nothing here starts.
-1123525  # vite: server.fs.deny bypass on Windows
-1139528  # vitest: UI server arbitrary file read/execute
-
-# --- adm-zip (via inngest-cli) ----------------------------------------------------------------
-# `inngest-cli` is a devDependency and the only thing that reaches adm-zip: it unpacks the release
-# archive it downloads for itself, reached solely by `bunx inngest-cli dev` in scripts/dev.sh and
-# scripts/start.sh. Neither is a deployment — start.sh states in its own header that it is "a
-# local, single-Owner dev-owner-mode stack, not a production deployment" — and neither `apps/web`
-# nor `apps/orchestrator` bundles the CLI. A hosted deployment targets Inngest Cloud, which is the
-# SDK talking to an API, not this binary.
-# 1.43.0 is the latest release and still depends on `adm-zip@^0.5.10`; there is no upstream fix to
-# take.
-# REACHABLE AGAIN if the single-command launcher (issue #17) ever ships the Inngest Dev Server as
-# part of an install — at that point the CLI stops being a developer's tool and becomes something
-# an operator runs. Re-check this entry when #17 lands.
-1123686  # adm-zip: crafted ZIP triggers a 4GB memory allocation
+# Reviewed: 2026-10-09 — empty: every earlier entry had stopped appearing in `bun audit`
+# (fixed upstream or by the root `overrides`), and a stale entry would let it come back unseen.
+# Re-check whenever `bun audit` output changes or an entry's stated assumption stops holding.

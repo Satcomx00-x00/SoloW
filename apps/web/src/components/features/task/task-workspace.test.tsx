@@ -838,6 +838,18 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
     await waitFor(() => expect(log.calls.filter((c) => c.path === "task.restore")).toHaveLength(1));
   });
 
+  it("says a long-finished run's transcript was removed by retention (Decision 0032)", async () => {
+    const prunedAt = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "done" }),
+      "session.listForTask": () => [{ ...session, state: "closed", eventsPrunedAt: prunedAt }],
+      "session.get": () => detail([]),
+    });
+
+    const notice = await screen.findByText(/transcript was removed by the Workspace's history/);
+    expect(notice.closest("[data-transcript-pruned]")).not.toBeNull();
+  });
+
   it("lists the sub-tasks a Restore brought back, even if the list's first read was in flight", async () => {
     // Restored moments after the page opened: the rail's first read of its sub-tasks began while
     // the Task — and so its children — were in History, and answers late with nothing.
@@ -867,6 +879,24 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
     const rail = await screen.findByRole("complementary", { name: "About this task" });
     const link = await within(rail).findByRole("link", { name: /Order the servo/ });
     expect(link.getAttribute("href")).toBe("/task/child-1");
+  });
+});
+
+describe("TaskWorkspace for a task that is not there", () => {
+  it("says so in words and links somewhere that exists", async () => {
+    renderWithTrpc(<TaskWorkspace taskId="task-gone" />, {
+      "task.get": () => {
+        throw new Error("NOT_FOUND");
+      },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("That task no longer exists");
+    expect(alert.textContent).not.toContain("NOT_FOUND");
+    // `/board` is not a route any more; with no Task there is no Project to name.
+    expect(screen.getByRole("link", { name: "Back to projects" }).getAttribute("href")).toBe(
+      "/projects",
+    );
   });
 });
 
@@ -960,6 +990,17 @@ describe("TaskWorkspace terminal pane", () => {
     const before = Number(edge.getAttribute("aria-valuenow"));
     fireEvent.keyDown(edge, { key: "ArrowLeft" });
     expect(Number(edge.getAttribute("aria-valuenow"))).toBe(before + 20);
+
+    // A drag paints the pane as it goes and remembers the width once, on release — not a page
+    // render and a storage write per pointer event.
+    const stored = () => window.localStorage.getItem("solow.task.terminalWidth");
+    fireEvent.pointerDown(edge, { clientX: 500 });
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 460 }));
+    expect(pane.style.getPropertyValue("--terminal-width")).toBe(`${before + 60}px`);
+    expect(stored()).toBe(String(before + 20));
+    window.dispatchEvent(new PointerEvent("pointerup"));
+    await waitFor(() => expect(stored()).toBe(String(before + 60)));
+    expect(Number(edge.getAttribute("aria-valuenow"))).toBe(before + 60);
 
     fireEvent.click(within(pane).getByRole("button", { name: "Close terminal" }));
     expect(screen.queryByRole("region", { name: "Terminal" })).toBeNull();
@@ -1810,13 +1851,13 @@ describe("TaskWorkspace todo checklist", () => {
     expect(screen.queryByRole("button", { name: /^Plan\./ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Todo list\./ })).toBeNull();
     // The legend says so too: nothing of either kind to go to.
-    const legend = screen.getByRole("navigation", { name: "On the board" });
+    const legend = screen.getByRole("navigation", { name: "In Steps" });
     expect(within(legend).getByRole("button", { name: /Plan/ }).hasAttribute("disabled")).toBe(
       true,
     );
   });
 
-  it("opens on the board in every state, and takes a pick back to it when the gate opens", async () => {
+  it("opens on the board while running, and takes a pick back to it when the gate opens in view", async () => {
     let state: TaskDto["state"] = "running";
     const diff: SessionEventPayload = {
       kind: "diff",
@@ -1837,7 +1878,7 @@ describe("TaskWorkspace todo checklist", () => {
     });
 
     // The board is the thing to watch while the run is going: its todos are on it.
-    const board = await screen.findByRole("tab", { name: "Board" });
+    const board = await screen.findByRole("tab", { name: "Steps" });
     await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
     expect(await screen.findByRole("button", { name: /^Todo list\./ })).toBeDefined();
 
@@ -1845,7 +1886,9 @@ describe("TaskWorkspace todo checklist", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Changes/ }), { button: 0 });
     expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
 
-    // The run reaches its gate: the page goes back to the board, where the gate now is.
+    // The run reaches its gate while the page is up: the pick ends with the state, and the view
+    // falls back to the board, where the gate now is — it does not jump to Changes by itself (E7
+    // is about arriving at a waiting Task, not moving the reader).
     state = "review";
     payloads = [...payloads, diff];
     await waitFor(() => expect(sockets[0]).toBeDefined());
@@ -1860,6 +1903,20 @@ describe("TaskWorkspace todo checklist", () => {
     await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
     await openGate();
     expect(await screen.findByRole("button", { name: "Approve" })).toBeDefined();
+  });
+
+  it("opens a Task that is already waiting at its gate on the review", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([]),
+      "stream.ticket": () => ({
+        url: "ws://hub.test/?ticket=t",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      }),
+    });
+    const changes = await screen.findByRole("tab", { name: /Changes/ });
+    await waitFor(() => expect(changes.getAttribute("aria-selected")).toBe("true"));
   });
 
   it("follows the run: a list published mid-run lands without a reload", async () => {
@@ -2006,6 +2063,34 @@ describe("TaskWorkspace workflow steps", () => {
     await waitFor(() => expect(stepStatuses()).toEqual(["done", "running", "upcoming"]));
   });
 
+  it("catches a Step that advanced before its stream was listening", async () => {
+    // The stream replays the transcript, never state: a `status` frame published between the
+    // page's first read and the socket subscribing reached nobody, and the strip stayed put.
+    let reads = 0;
+    let firstRead: () => void = () => {};
+    const readOnce = new Promise<void>((resolve) => {
+      firstRead = resolve;
+    });
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task({ state: "running", workflowId: "wf-1", workflowStepId: "st-2" }),
+      "workflow.taskBinding": () => {
+        reads += 1;
+        firstRead();
+        // Step 1 when first read; by the time anything asks again, the run has moved on.
+        return binding(reads === 1 ? "st-1" : "st-2");
+      },
+      // The socket subscribes only after that first read — the order that loses the frame.
+      "stream.ticket": async () => {
+        await readOnce;
+        return { url: "ws://hub.test/?ticket=t", expiresAt: "2026-01-01T00:01:00.000Z" };
+      },
+    });
+
+    const strip = await screen.findByRole("region", { name: "Workflow progress" });
+    await waitFor(() => expect(strip.textContent).toContain("Step 2 of 3"));
+  });
+
   it("marks the last Step done once the Task is, rather than leaving it current forever", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       ...base,
@@ -2030,7 +2115,7 @@ describe("TaskWorkspace workflow steps", () => {
       "Do it.",
     );
     // The board is read for the Step picked: the dialog closes and the page asks for that Step.
-    fireEvent.click(within(dialog).getByRole("button", { name: "Show this step on the board" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show in Steps" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() =>
       expect(log.calls.filter((c) => c.path === "session.get").at(-1)?.input).toEqual({
@@ -2135,7 +2220,7 @@ describe("TaskWorkspace step-scoped board", () => {
   /** Scope the board to a Step the way the page offers it: its header, then its dialog's button. */
   async function showStep(name: string) {
     fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^Step\\. ${name}`) }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show this step on the board" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show in Steps" }));
   }
 
   it("opens on the Step the run is on, and asks for only that Step's log", async () => {

@@ -102,3 +102,14 @@ differently-licensed program) and MPL-2.0 (`lightningcss`, whose copyleft is per
   likely, and a separate decision.
 - **Relicensing the Inngest binary packages.** Not SoloW's to relicense; they carry upstream's
   terms and will continue to.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** `LICENSE` is the Apache-2.0 text and `NOTICE` ships with the npm package.
+The platform packages still carry the Inngest binary (`@satcomx00-x00/solow-inngest-*`), which
+the launchers now run as the self-hosted `inngest start` rather than the Dev Server
+([0004](./0004-durable-orchestration-engine.md)); that changes nothing about what is
+relicensed.

@@ -22,14 +22,15 @@
  * every package unchanged, and each package's README says plainly whose software it is. The
  * decision to redistribute was taken deliberately by the repository owner (2026-08-28).
  *
- * Run: `bun run packages/cli/scripts/build-inngest-packages.ts [--publish]`
- * Without `--publish` it builds the package directories and stops, which is what CI and a
- * dry run want.
+ * Run: `bun run packages/cli/scripts/build-inngest-packages.ts [--publish | --pack-into <dir>]`
+ * Without either it builds the package directories and stops, which is what a dry run wants.
+ * `--pack-into` writes each package npm does not have yet as a tarball in `<dir>` instead of
+ * publishing it, so CI can publish from a job that has the npm token and runs nothing else.
  */
 
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -89,6 +90,12 @@ async function download(url: string, to: string) {
 }
 
 const publish = process.argv.includes("--publish");
+const packFlag = process.argv.indexOf("--pack-into");
+const packInto = packFlag === -1 ? undefined : process.argv[packFlag + 1];
+if (packFlag !== -1 && !packInto) throw new Error("--pack-into needs a directory");
+if (publish && packInto) throw new Error("--publish and --pack-into are alternatives");
+const packDir = packInto ? resolve(packInto) : undefined;
+if (packDir) await mkdir(packDir, { recursive: true });
 const version = await inngestVersion();
 
 console.log(`inngest vendor packages: version ${version}${publish ? " (publishing)" : ""}`);
@@ -176,7 +183,7 @@ for (const target of TARGETS) {
 
   await rm(archive, { force: true });
 
-  if (!publish) continue;
+  if (!publish && !packDir) continue;
 
   /*
    * These are versioned on Inngest, not on SoloW: `@…/solow-inngest-linux-x64@1.44.0` holds
@@ -191,11 +198,17 @@ for (const target of TARGETS) {
     console.log(`    already on npm — skipped`);
     continue;
   }
+  if (packDir) {
+    await run(["npm", "pack", "--pack-destination", packDir], dir);
+    continue;
+  }
   await run(["npm", "publish", "--access", "public"], dir);
 }
 
 console.log(
   publish
     ? "\ninngest vendor packages: published"
-    : `\ninngest vendor packages: built in ${OUT} (pass --publish to publish)`,
+    : packDir
+      ? `\ninngest vendor packages: those npm does not have are packed in ${packDir}`
+      : `\ninngest vendor packages: built in ${OUT} (pass --publish to publish)`,
 );

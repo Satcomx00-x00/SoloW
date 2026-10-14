@@ -6,10 +6,31 @@ import {
   setSecretResultDto,
 } from "@solow/contracts";
 import { z } from "zod";
+import type { RequestContext } from "../dal/context.js";
 import { deleteSecret, listSecretRefs, setSecret } from "../dal/secret.js";
 import { taskIdsBlockedByCredential } from "../dal/task.js";
 import { ownerProcedure, rateLimit, router, unwrap } from "../trpc.js";
 import { resumeTask } from "./task.js";
+
+/**
+ * Restart every Task that was paused on this Secret, and say how many. What makes replacing a
+ * credential the only click a credential-expiry pause needs — from Settings, or from the guided
+ * setup when someone pastes a fresh token there.
+ */
+export async function resumeTasksBlockedBy(rctx: RequestContext, secretId: string) {
+  let resumed = 0;
+  for (const taskId of await taskIdsBlockedByCredential(rctx, secretId)) {
+    try {
+      await resumeTask(rctx, taskId);
+      resumed += 1;
+    } catch {
+      // A Task that cannot start right now (a dependency added since it failed, the
+      // concurrency cap) is left exactly as it was — Parked/Failed and renewable again —
+      // rather than letting one Task's refusal stop the rest of the batch from resuming.
+    }
+  }
+  return resumed;
+}
 
 export const secretRouter = router({
   /**
@@ -31,21 +52,7 @@ export const secretRouter = router({
     .output(setSecretResultDto)
     .mutation(async ({ ctx, input }) => {
       const secret = unwrap(await setSecret(ctx.rctx, input));
-
-      const blockedTaskIds = await taskIdsBlockedByCredential(ctx.rctx, secret.id);
-      let resumedTaskCount = 0;
-      for (const taskId of blockedTaskIds) {
-        try {
-          await resumeTask(ctx.rctx, taskId);
-          resumedTaskCount += 1;
-        } catch {
-          // A Task that cannot start right now (a dependency added since it failed, the
-          // concurrency cap) is left exactly as it was — Parked/Failed and renewable again —
-          // rather than letting one Task's refusal stop the rest of the batch from resuming.
-        }
-      }
-
-      return { secret, resumedTaskCount };
+      return { secret, resumedTaskCount: await resumeTasksBlockedBy(ctx.rctx, secret.id) };
     }),
 
   /** List Secret metadata (id/name/kind/usedBy) — never the value. */

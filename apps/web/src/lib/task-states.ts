@@ -1,8 +1,10 @@
 import type { TaskState } from "@solow/contracts";
 import {
   CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
   INTERRUPTED_REASON,
   PARTIAL_INTEGRATION_REASON,
+  STRANDED_PARK_REASON,
   STRANDED_REVIEW_REASON,
 } from "@solow/core";
 import {
@@ -21,6 +23,7 @@ import {
 
 export {
   CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
   INTERRUPTED_REASON,
   PARTIAL_INTEGRATION_REASON,
   STRANDED_REVIEW_REASON,
@@ -54,8 +57,8 @@ export const STATE_LABELS: Record<TaskState, string> = {
  * How each lifecycle state looks (task TASK-021 / F02).
  *
  * State is the one thing a reader opens this tool to learn, and the seven states are not equally
- * urgent: `review` is the only one waiting on a human (Principle I), `parked` resumes by itself
- * when the quota window resets, `failed` will not. Mapping them onto shadcn's four generic badge
+ * urgent: `review` is the only one waiting on a human (Principle I), `parked` tries again by
+ * itself after a fixed wait, `failed` will not. Mapping them onto shadcn's four generic badge
  * variants collapsed three pairs into identical pills — Running read exactly like Review, Ready
  * like Done, Backlog like Parked — so the board said "seven columns" while the badges said
  * "four kinds of thing".
@@ -152,10 +155,8 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
  * written to stop the banner making.
  *
  * `park_never_resumed` is not hypothetical: the orchestrator's sweep writes it onto a Task that
- * slept through its quota window, so the board really was rendering that string. Its literal is
- * repeated here rather than imported because it is defined in the orchestrator
- * (`apps/orchestrator/src/reconcile.ts`), which the web app does not depend on; `fail` and `park`
- * are `classifyRunFailure`'s own verdicts.
+ * slept through its quota window, so the board really was rendering that string. `fail` and
+ * `park` are `classifyRunFailure`'s own verdicts.
  *
  * The tone matters as much as the wording. A parked Task's reason painted in the failed red
  * would contradict the violet badge sitting next to it, so each reason names the state whose
@@ -168,7 +169,7 @@ const FAILURE_REASONS: Record<
 > = {
   fail: { label: "Run failed", tone: "failed" },
   park: { label: "Paused on quota", tone: "parked" },
-  park_never_resumed: { label: "Never resumed", tone: "parked" },
+  [STRANDED_PARK_REASON]: { label: "Never resumed", tone: "parked" },
   // Distinguished from a generic failure (spec AC-013, issue #63): this one has a one-click fix.
   [CREDENTIAL_EXPIRED_REASON]: {
     label: "Credential expired",
@@ -191,9 +192,18 @@ const FAILURE_REASONS: Record<
     detail:
       "A decision was recorded here and never applied. Decide again — the decision starts the run that applies it; nothing was lost.",
   },
+  // Approved and committed, but the push or the pull request did not go through (A1). Not a
+  // failure of the work, so it is not retried: Ship again pushes what is committed.
+  [DELIVERY_FAILED_REASON]: {
+    label: "Not shipped",
+    tone: "failed",
+    icon: TriangleAlert,
+    detail:
+      "Approved and committed, but not pushed, or its request was not opened — the session log says why. Fix that, then Ship again; nothing is run again. Keep local finishes it without shipping.",
+  },
   // The one failure where the work is *partly landed* (issue #70 AC-4).
   [PARTIAL_INTEGRATION_REASON]: {
-    label: "Partly integrated",
+    label: "Partly committed",
     tone: "failed",
     icon: TriangleAlert,
     detail:

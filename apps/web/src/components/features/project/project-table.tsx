@@ -563,10 +563,14 @@ function ariaSortFor(
  * and the only way back from a width dragged too small to read.
  */
 function ResizeHandle({
+  onDrag,
   onResize,
   onAutoFit,
   label,
 }: {
+  /** Every pointer move: the width to draw, which is not yet a width to keep. */
+  onDrag: (width: number) => void;
+  /** The width to keep — once per drag, on release, and once per key press. */
   onResize: (width: number) => void;
   onAutoFit: () => void;
   label: string;
@@ -586,13 +590,27 @@ function ResizeHandle({
         const startWidth = header.getBoundingClientRect().width;
         event.currentTarget.setPointerCapture(event.pointerId);
 
-        const move = (moved: PointerEvent) => onResize(startWidth + (moved.clientX - startX));
+        /*
+         * Drawn on every move, saved on release. Saving per move was a layout write and a refetch
+         * of it for every pixel of the drag, and the column moved in jumps, one per round trip.
+         * A cancelled pointer ends the drag too, or its listeners would outlive it.
+         */
+        let last: number | null = null;
+        const move = (moved: PointerEvent) => {
+          last = startWidth + (moved.clientX - startX);
+          onDrag(last);
+        };
         const done = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", done);
+          window.removeEventListener("pointercancel", done);
+          // A press that never moved is not a resize: saving it would freeze a content-sized
+          // column at whatever it measured.
+          if (last !== null) onResize(last);
         };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", done);
+        window.addEventListener("pointercancel", done);
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
@@ -1088,6 +1106,15 @@ export function ProjectTable({
    * default" (AC-1). A table that remembered what was collapsed would open every epic the first
    * time it rendered, turning a 20-row table into 60 before anyone asked for it.
    */
+  /**
+   * The column being dragged and how wide it is right now — local, so a drag redraws this table
+   * and nothing else, and the layout is written once when it is let go (see `ResizeHandle`).
+   */
+  const [dragWidth, setDragWidth] = useState<{ fieldId: string; width: number } | null>(null);
+  const shownWidths = useMemo(
+    () => (dragWidth ? { ...widths, [dragWidth.fieldId]: dragWidth.width } : widths),
+    [widths, dragWidth],
+  );
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   /**
    * Held still across renders so `BodyRow`'s memo survives a scroll — a `setExpanded` closure
@@ -1128,10 +1155,16 @@ export function ProjectTable({
       return everyIdChecked ? new Set() : new Set(ids);
     });
   }, [rows]);
+  /*
+   * Read through a ref so the callback every row holds stays the same while rows are ticked —
+   * otherwise one checkbox redrew every row on screen.
+   */
+  const selectedRowsRef = useRef(selectedRows);
+  selectedRowsRef.current = selectedRows;
   const launchSelected = useCallback(() => {
-    onLaunchSelected?.(selectedRows);
+    onLaunchSelected?.(selectedRowsRef.current);
     setSelected(new Set());
-  }, [onLaunchSelected, selectedRows]);
+  }, [onLaunchSelected]);
 
   /**
    * How tall the scrolling pane is and how far down it, which is the whole input to windowing
@@ -1239,10 +1272,10 @@ export function ProjectTable({
    * So the shape of the tree and the arithmetic on it come from everything; only what is *drawn*
    * is filtered, below.
    */
-  const roots = useMemo(
-    () => buildProjectHierarchy((hierarchyRows ?? rows).map(toNestableRow)),
-    [hierarchyRows, rows],
-  );
+  // `source`, not both arrays: with `hierarchyRows` passed, `rows` is only the filtered subset,
+  // and depending on it rebuilt the whole tree — new row objects, every row redrawn — per filter.
+  const source = hierarchyRows ?? rows;
+  const roots = useMemo(() => buildProjectHierarchy(source.map(toNestableRow)), [source]);
 
   /**
    * Which rows the filter admits. A parent stays drawn when a descendant matches — hiding an epic
@@ -1280,7 +1313,9 @@ export function ProjectTable({
     const byKey = new Map<string, ProjectTreeNode<NestableProjectRow>[]>();
     for (const node of roots) {
       const key = groupKeyFor(node.row, groupField);
-      byKey.set(key, [...(byKey.get(key) ?? []), node]);
+      const bucket = byKey.get(key);
+      if (bucket) bucket.push(node);
+      else byKey.set(key, [node]);
     }
     const ordered = groupField.options.map((option) => ({
       key: option.id,
@@ -1418,7 +1453,7 @@ export function ProjectTable({
                 Sub-issues
               </TableHead>
               {columns.map((field) => {
-                const stored = widths?.[field.id];
+                const stored = shownWidths?.[field.id];
                 return (
                   <TableHead
                     key={field.id}
@@ -1475,7 +1510,13 @@ export function ProjectTable({
                     {onResize && (
                       <ResizeHandle
                         label={field.name}
-                        onResize={(width) => onResize(field.id, clampWidth(width))}
+                        onDrag={(width) =>
+                          setDragWidth({ fieldId: field.id, width: clampWidth(width) })
+                        }
+                        onResize={(width) => {
+                          setDragWidth(null);
+                          onResize(field.id, clampWidth(width));
+                        }}
                         onAutoFit={() => onResize(field.id, null)}
                       />
                     )}
@@ -1560,7 +1601,7 @@ export function ProjectTable({
                   isExpanded={expanded.has(line.entry.row.item.id)}
                   onToggle={toggleExpanded}
                   columns={columns}
-                  widths={widths}
+                  widths={shownWidths}
                   labelColours={labelColours}
                   priorityChoices={priorityChoices}
                   dateRange={dateRange}
@@ -1571,7 +1612,8 @@ export function ProjectTable({
                   onSetPriority={onSetPriority}
                   onStartTask={onStartTask}
                   selected={selected.has(line.entry.row.item.id)}
-                  selectedCount={selectedRows.length}
+                  // Only a ticked row offers the bulk action, so only a ticked row needs the count.
+                  selectedCount={selected.has(line.entry.row.item.id) ? selectedRows.length : 0}
                   onToggleSelect={selectable ? toggleSelected : undefined}
                   onLaunchSelected={selectable ? launchSelected : undefined}
                 />

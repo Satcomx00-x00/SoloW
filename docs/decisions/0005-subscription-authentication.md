@@ -40,3 +40,21 @@ when the window resets.
   API-key mode (risk R-1); credential isolation must hold across all Executors (risk R-3).
 - Realises [F06](../features/F06-authentication-billing.md) and
   [F17](../features/F17-security-secrets.md).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, except the Park consequence, which is weaker than written.**
+
+- Two billing modes per Harness Profile, and the strip of the conflicting credential, are built:
+  `resolveHarnessRunEnv` (`packages/core/src/billing.ts`) reads the variable names off the
+  harness's catalog row. The concurrency cap is enforced by one atomic claim
+  (`claimTaskRunSlot`).
+- "Parks work when a quota window is exhausted, resuming automatically when the window resets"
+  is not what is built. No quota is detected: a harness that stops with words that read as an
+  exhausted quota parks its Task, and the run sleeps a fixed five hours (`PARK_SLEEP_MS`) whether
+  or not the window has reset. There is no spending limit. Real quota detection is Later
+  ([F06](../features/F06-authentication-billing.md), [Roadmap](../ROADMAP.md)).
+- "Across all Executor types" means local and container today; remote and cloud have no driver.

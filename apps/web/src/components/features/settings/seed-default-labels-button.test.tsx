@@ -46,7 +46,7 @@ describe("SeedDefaultLabelsButton", () => {
   it("shows the error message on failure", async () => {
     renderWithTrpc(<SeedDefaultLabelsButton provider="github" repositoryId="repo-1" />, {
       "repository.seedDefaultLabels": () => {
-        throw new Error("This repository has no linked integration.");
+        throw new Error("INTEGRATION_NOT_LINKED");
       },
     });
 
@@ -54,7 +54,7 @@ describe("SeedDefaultLabelsButton", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toBe(
-        "This repository has no linked integration.",
+        "This repository is not linked to a connected integration, so there is nothing to sync from. Connect one in Settings → Integrations.",
       ),
     );
   });

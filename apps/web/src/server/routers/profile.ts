@@ -7,7 +7,9 @@ import {
   deleteExecutorProfileInput,
   deleteHarnessConfigInput,
   deleteHarnessProfileInput,
+  dockerAvailabilityReport,
   duplicateHarnessConfigInput,
+  executorImageBuildStatus,
   executorProfileDto,
   executorProfileListDto,
   exportHarnessConfigInput,
@@ -319,6 +321,28 @@ export const profileRouter = router({
       .input(deleteExecutorProfileInput)
       .output(executorProfileDto)
       .mutation(async ({ ctx, input }) => unwrap(await deleteExecutorProfile(ctx.rctx, input))),
+    /**
+     * Whether a container runtime is reachable, so a new Executor starts as Docker when it can
+     * (roadmap B4). Null when the orchestrator could not be asked — not the same as "no Docker".
+     */
+    dockerAvailability: ownerProcedure
+      .output(dockerAvailabilityReport.nullable())
+      .query(({ ctx }) => orchestrator.dockerAvailability({ workspaceId: ctx.rctx.workspaceId })),
+    /**
+     * Where the build of the executor image is, so the guided setup can build it in one click
+     * (roadmap B4). Null when the orchestrator could not be asked.
+     */
+    imageBuild: ownerProcedure
+      .output(executorImageBuildStatus.nullable())
+      .query(({ ctx }) =>
+        orchestrator.executorImageBuild({ workspaceId: ctx.rctx.workspaceId, start: false }),
+      ),
+    /** Start that build, or join the one already running. Answers at once; the build takes minutes. */
+    buildImage: ownerProcedure
+      .output(executorImageBuildStatus.nullable())
+      .mutation(({ ctx }) =>
+        orchestrator.executorImageBuild({ workspaceId: ctx.rctx.workspaceId, start: true }),
+      ),
     list: ownerProcedure
       .meta({
         openapi: {

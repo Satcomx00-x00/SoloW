@@ -9,11 +9,13 @@ import {
   closeGate,
   connectRepository,
   createTask,
+  expectTaskDeleted,
   gateButton,
   launchTask,
   launchToReview,
   openGate,
   openTask,
+  openTaskReadyToDelete,
   openWorkspaceTab,
   sessionLog,
   taskIdOnPage,
@@ -35,7 +37,7 @@ async function ensureRepository(page: import("@playwright/test").Page): Promise<
 }
 
 test.describe("the Task page", () => {
-  // Each of these walks a real run and several page loads on the e2e `next dev`, which on a
+  // Each of these walks a real run and several page loads on the suite's former `next dev`, which on a
   // loaded host costs 2–4 s a request: the delete-and-undo case measured 3.9 min passing, past
   // the runner's 180 s default. The budget follows the walk, as in `subtasks.spec.ts`.
   test.describe.configure({ timeout: 6 * 60_000 });
@@ -58,11 +60,11 @@ test.describe("the Task page", () => {
     await launchToReview(page);
 
     const tabs = page.getByRole("tablist", { name: "Task" });
-    for (const name of ["Board", "Brief", "Changes"]) {
+    for (const name of ["Steps", "Brief", "Changes"]) {
       await expect(tabs.getByRole("tab", { name, exact: true })).toBeVisible();
     }
     // At the gate the page opens on the board, where the gate is.
-    await expect(tabs.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
 
     await openWorkspaceTab(page, "Brief");
     await expect(page).toHaveURL(/[?&]tab=brief/);
@@ -297,26 +299,27 @@ test.describe("the Task page", () => {
       repository: REPO_NAME,
     });
     const taskId = await openTask(page, issue.id, taskTitle);
-    // Where the delete lands is the unassigned list; visited once now so that, under the e2e
-    // `next dev`, its first compile (10–20s on this host) does not eat the toast's ten seconds.
-    await page.goto("/unassigned");
-    await page.goto(`/task/${taskId}`);
-    await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+    // Where the delete lands is the unassigned list (the Issue is in no Project).
+    const ready = { taskId, title: taskTitle, destination: "/unassigned" };
+    await openTaskReadyToDelete(page, ready);
 
     // No dialog for a Task with no run and nothing waiting on it: it goes on the press, with
-    // Undo on the toast — and Undo means it.
+    // Undo on the toast — and Undo means it. Undo is pressed before the navigation is waited
+    // out: the toast's ten seconds run from the delete, not from the arrival.
     await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
+    await expectTaskDeleted(page, taskId, true);
     const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
-    await expect(toast).toBeVisible();
     await toast.getByRole("button", { name: "Undo" }).click();
-    await page.goto(`/task/${taskId}`);
-    await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+    // Settled on the server before the next `goto`, so the restore is not left in flight.
+    await expectTaskDeleted(page, taskId, false);
+    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
+    await openTaskReadyToDelete(page, ready);
     await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
 
     // Deleted for real, the page says so and offers Restore, and nothing else acts on it.
     await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
+    await expectTaskDeleted(page, taskId, true);
+    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
     await page.goto(`/task/${taskId}`);
     await expect(page.locator("[data-task-deleted]")).toBeVisible();
     await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();

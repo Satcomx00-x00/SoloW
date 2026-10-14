@@ -18,7 +18,7 @@ steerable without reading logs.
 
 ## User stories
 
-- As a Team Lead, I want to design a process where one harness plans, another implements, and
+- *(Later — team use.)* As a Team Lead, I want to design a process where one harness plans, another implements, and
   a third reviews, so my team runs it the same way every time.
 - As a user, I want to see, as a graph, where a running Workflow currently is, so I
   understand its state instantly.
@@ -111,8 +111,8 @@ it is how an operator gets from one shape to the next.
   the Step, skip it (if allowed), or cancel the Run.
 - If a Gate is never resolved, the Run remains paused and is clearly shown as waiting on a
   human, and can be reassigned or cancelled.
-- If a Harness Step exhausts a subscription quota, the Step parks and the Run waits, matching
-  Task Parked behaviour in [F06](./F06-authentication-billing.md).
+- If a Harness Step stops on what reads as an exhausted quota, the Step parks and the Run waits
+  a fixed five hours, matching Task Parked behaviour in [F06](./F06-authentication-billing.md).
 
 ## Out of scope
 
@@ -133,7 +133,7 @@ it is how an operator gets from one shape to the next.
   the gates are a person's to open. The two library *lists* are exposed so a Step can name items
   by id; library writes stay signed-in.
 - **A node is a form only when you are close enough to fill one.** Below 0.72 zoom every Step
-  card collapses to what a pipeline is *read* for — ordinal, name, harness, gate and advance rule,
+  card collapses to what a pipeline is *read* for — ordinal, name, harness, the gate's plain name,
   a branch mark, a problem count — and the fields come back on the way in (React Flow's contextual
   zoom). Six nodes each drawing three selects, a prompt, two library pickers and a branch form was
   a wall of controls with the pipeline somewhere behind it, at a zoom where none of them could be
@@ -300,8 +300,11 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
 - **Every Step names a Harness Profile** from the catalog of [F05](./F05-harness-executor-profiles.md)
   (issue #10). There is no second way of naming a harness, which is what makes "a single Task uses
   different harnesses across Steps" a difference between two rows.
-- **Gates.** A Step's gate is `human`, `auto`, or `auto-unless-changes`; its advance rule is
-  `agent-signal` or `review`. A gate decides whether an *intermediate* Step waits for a person.
+- **Gates.** A Step's gate is `human`, `agent-decides`, `auto`, or `auto-unless-changes` — shown
+  as Wait for review, Harness decides, Move on, and Move on unless files changed
+  (`apps/web/src/lib/workflow-gates.ts`); its advance rule is `agent-signal` or `review`, shown
+  as "Finished when": Harness says done / You approve it. A Step that finishes on a review waits
+  for one whatever its gate says, so the designer keeps the two in step. A gate decides whether an *intermediate* Step waits for a person.
 - **The human decision before integration is unconditional, and it is an approval.** The last Step
   of a Workflow reports `completed` only once an `approve` review is recorded for the Task,
   whatever every Step's gate says; the gate value is not consulted on that branch at all
@@ -458,8 +461,8 @@ pipeline*, the badge says *what is happening to it*.
   `StaleCursor` replay guard relies on it moving. A Step another Step branches to cannot be
   deleted (`WORKFLOW_STEP_BRANCHED_TO`): nulling the reference would silently turn "go to X" into
   "the pipeline ends here".
-- **Concurrency caps are still checked against the Task's Profile only.** `withinConcurrencyCap` in
-  `apps/web/src/server/dal/task.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
+- **Concurrency caps are still checked against the Task's Profile only.** `claimTaskRunSlot` in
+  `packages/db/src/task-claim.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
   whose Harness Profile is already at its cap is not checked at all. This issue opens that hole; it
   closes when the cap check learns about the cursor.
 
@@ -468,9 +471,9 @@ and the per-Step review linkage it unlocks, copy-on-write versioning so a Run re
 the definition it started on, non-harness Step kinds (Gate, Fork/Join — FR-2; Condition ships as a Step property, above), validity
 checking (FR-5), import/export (FR-7), and per-Step run history.
 
-The /workflows UI keeps its WIP badge (`Section.wip` in `apps/web/src/lib/navigation.ts`) while the
-Monitor and per-Step history are outstanding, so a user finds a clearly-marked in-progress surface
-rather than one that looks broken.
+The /workflows UI carried a WIP badge until 2026-10-09. It was removed when Workflows became part
+of the supported main line ([0031](../decisions/0031-focus-on-the-solo-power-user.md)); what is
+still outstanding is listed above rather than flagged in the interface.
 
 ## Related
 

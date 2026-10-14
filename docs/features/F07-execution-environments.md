@@ -8,6 +8,12 @@ An Executor is where a Harness actually runs. SoloW supports several execution
 environments so users can run harnesses locally for convenience or offload heavy work to
 containers, remote machines, or the cloud — all managed from the same control plane.
 
+> **What is built:** the local executor (the user's own machine, for trusted agents only) and
+> the container executor (Docker). **Remote (SSH) and cloud environments are Later**
+> ([0031](../decisions/0031-focus-on-the-solo-power-user.md)): their profile shapes exist, but neither has a driver, so a Task on one fails
+> before a harness starts; their kinds are hidden behind `ff-remote-environments`, which ships
+> OFF.
+
 ## The `Executor` interface (issue #1)
 
 Before a second Executor kind existed, SoloW adopted one interface every kind implements —
@@ -59,6 +65,96 @@ has now been tested once, by the Container Executor (#96). It held: the call sit
 copy setup files and launch the harness were not rewritten for it, and `baseEnv()` above is the only
 member the interface gained. Remote SSH (#97) and Cloud (#107) follow the same shape.
 
+## Isolated by default, and the local executor is for trusted agents only (roadmap B4, B5)
+
+The Local Executor runs the harness as the orchestrator's own user, on the orchestrator's own
+machine. Nothing separates it from everything that user can read, change or send, and a Harness
+Profile whose permission mode is "never ask" does not stop before it acts. So the local
+executor is documented, and presented, as **for trusted agents only**.
+
+- **A new Executor starts as Docker whenever Docker is reachable.** The orchestrator answers
+  `POST /executor-availability` (a signed ticket, like the harness probe) by asking the daemon for
+  its version, and whether it already has the executor image (below); the Executors page reads it
+  through `profile.executor.dockerAvailability`, and a new Docker executor's image field starts
+  filled in with that image when it is there. When the orchestrator cannot be asked, the page does
+  not read that as "no Docker" and says so.
+- **A new Task starts on the Docker executor** when the Owner has not saved a default and the
+  Workspace has one.
+- **The guided setup puts Claude in a container when it can.** "Connect Claude" creates an
+  executor named "Isolated container" from the executor image when Docker answers and already has
+  that image, and "This machine" (local) otherwise. Re-running it after the image is built moves a
+  Workspace still on the setup's own "This machine" — with no Docker executor of any kind — onto a
+  new isolated one and makes that the default; the local one stays in Settings, unchanged. An
+  executor the Owner made, or a local default kept beside an existing Docker executor, is never
+  overruled. Server and screen apply one rule, `setupExecutorPlan` in `@solow/contracts`, so the
+  screen says where Claude will work before Connect is pressed: in the container, or on this
+  machine under the host-run warning — and, when the image is all that is missing, a button that
+  builds it (below).
+
+### The executor image
+
+The Docker driver spawns the harness's bare command inside `config.image`, so a container is only
+as useful as an image with a harness in it. SoloW's is `docker/executor/Dockerfile`:
+
+- **Contents.** Debian 13 slim, `git`, `ca-certificates` and `procps` (the driver stops a harness
+  by exec'ing a `kill` binary, which a slim Debian lacks), Claude Code and opencode as their
+  native executables in `/usr/local/bin`, and nothing else — no Node, no npm, no credentials. The
+  versions are pinned in the file (`ARG CLAUDE_CODE_VERSION`, `ARG OPENCODE_VERSION`); opencode's
+  must equal the orchestrator's `@opencode/cli` dependency and the catalog's `minVersion`, which
+  `executor-image.test.ts` checks. The harnesses' self-updaters are switched off, since the
+  install directory is root's and a run is not.
+- **The user.** `USER 1000:1000`, named `solow`. The driver always passes `--user` with the
+  orchestrator's own uid:gid anyway, so the harnesses are world-executable, and `HOME` is left to
+  the driver's tmpfs: the image declares none, because a declared one would win over it.
+- **Building it from the setup.** Where Docker answers and the image is all that is missing, the
+  guided setup offers "Build the isolated environment" (and, when the test fails on the image,
+  "Rebuild the image"). The orchestrator runs the build (`executor/image-build.ts`), started by
+  `POST /executor-image/build` and read by `POST /executor-image`, both signed like the
+  availability check and read through `profile.executor.imageBuild` / `buildImage`. The start
+  answers at once and the build carries on without the request; one runs at a time, a second
+  press joins it, and where it is — state, the newest forty lines, a failure in words — is held in
+  memory, so a restart forgets it and the button is offered again (the layers already built are
+  Docker's cache, not SoloW's, and survive). The screen polls every two seconds while one runs
+  and never otherwise, shows the elapsed time and Docker's newest line, and on success asks the
+  availability check again, which is what moves the plan to the container. A build is stopped
+  after thirty minutes. The Dockerfile is imported as text, so `docker/executor/Dockerfile` stays
+  its one home: Bun reads it in a checkout, and `bun build` inlines it into the published
+  orchestrator. Unlike the command below, this build is not followed by a version check: the
+  setup's test, which runs the run's own preflight in a container of the image, is that check.
+- **Building it by hand.** `make executor-image` in a checkout, or `npx @satcomx00-x00/solow
+  executor-image` for an npm install — the same code (`packages/cli/bin/solow.mjs`), reading the
+  same Dockerfile (shipped in the package as `dist/executor/Dockerfile`). It pipes the file to
+  `docker build -`, so there is no build context to leak from, tags `solow-executor:local`, then
+  runs `claude --version` and `opencode --version` in it as the invoking uid with a tmpfs `HOME`,
+  and only then calls it ready. `make smoke-docker SMOKE_DOCKER_IMAGE=solow-executor:local` puts it
+  through the driver's own preflight and acceptance checks. The setup shows both commands beside
+  its button, for whoever would rather watch the whole log.
+- **Naming another image.** `SOLOW_EXECUTOR_IMAGE` on the orchestrator names the image the setup
+  looks for and builds (and the command tags, when set for it too). It is looked up, never pulled:
+  a local tag has no registry, and the setup chooses a container only when the daemon already has
+  the image.
+- **Not published, deliberately.** No registry carries it, and none should: the image contains
+  Claude Code, whose package states "© Anthropic PBC. All rights reserved. Use is subject to the
+  Legal Agreements" (its `LICENSE.md`; `npm view @anthropic-ai/claude-code license` answers "SEE
+  LICENSE IN README.md"). To our understanding nothing there grants redistribution, and a public
+  image would be redistributing it — this is a reading, not legal advice. Each machine builds its
+  own from npm instead, which is what the setup's button makes a one-click step.
+- **The setup's test runs in it.** The test asks the orchestrator to probe the executor a new
+  Task would get (`executorProfileId` on `POST /probe-agent`), so a setup that put Claude in a
+  container is tested in a one-shot container of that image — see "Launches that are not a
+  Task's run" below. A missing or unusable image fails the test as "SoloW couldn't start the
+  isolated container", and a harness missing from the image says so rather than asking the Owner
+  to install Claude on the host; both offer to rebuild the image there.
+- **Never-ask on the local executor is a deliberate choice.** Wherever a Task is created or a batch
+  launched, the pairing of a `bypassPermissions` Harness Profile with a `local` Executor shows an
+  alert ("This run is not isolated") before the Owner confirms. There is no server-side refusal:
+  the pairing is valid, and a refusal would break unattended runs the Owner has chosen on purpose.
+- **The control plane's secrets stay out of the harness's reach where this product can enforce
+  it.** The local executor's `baseEnv()` withholds `SOLOW_`, `INNGEST_` and `BETTER_AUTH_`
+  variables that read as secrets (the encryption key, database URL, signing keys). That is
+  hygiene, not isolation: a local harness can still read the database and key *files* its user can
+  read. The container is where "cannot" holds — see the next section.
+
 ## The Container Executor (issue #96)
 
 `docker.ts` runs **one long-lived container per Task, with every command a `docker exec` into
@@ -85,6 +181,13 @@ a user gets.
   environment a command runs under is delivered on that command's own stdin (Principle IV,
   [F17](./F17-security-secrets.md)), because `-e` would put it in a host-visible command line and
   in the container's inspectable configuration for as long as it exists.
+- **A container holds one credential and none of the control plane's state (B5).** Its
+  environment is the image's, the Profile's own variables, the app-owned configuration, and the
+  one credential the run needs (`SpawnOpts.env` replaces rather than merges, so nothing of the
+  orchestrator's environment — encryption key, database URL, signing keys — is inherited). The
+  orchestrator's SQLite database and its journal files are on a deny-list the mount guard checks
+  before its allow-list (`protectedPaths`): a Profile mount that is, contains or sits inside them
+  is refused even in a content area such as `/srv` or `/data` that the allow-list would admit.
 - **Health is the container's own, never the host's proxied.** CPU and memory come from the
   container's cgroup; no load average is reported at all, because `/proc/loadavg` inside a
   container is the *host's* figure and publishing it as the Task's would be a wrong number rather
@@ -93,6 +196,65 @@ a user gets.
   immediately, and the reconciliation sweep removes containers a crashed orchestrator left behind
   — identified by their labels, and only once the Task and the harness registry both agree no run
   still holds them.
+
+### Launches that are not a Task's run (roadmap B4)
+
+Two things start a harness outside any run: the Brief tab's **Explain** (`POST /explain`) and the
+guided setup's **test** (`POST /probe-agent` with `turn` and `executorProfileId`). Both run where
+the Task — or, for the setup, a new Task — runs: on the host for a Local Executor Profile, and for
+a Docker one in a **one-shot container** built by the same factory and checked by the same
+preflight as a run (`openOutOfBandExecutor` in `executor/factory.ts`), so the image, limits,
+prepare script, utilities and harness binary are the run's, and so is every refusal. The
+credential reaches the harness as it does on a run — on the exec's stdin, under the container's
+own `HOME`.
+
+- **It is never the Task's container.** A one-shot is labelled `solow.role=oneshot` and named for
+  its request, not its Task, so it can neither adopt a running Task's container nor be found and
+  removed by that Task's own run: every container lookup is scoped by role. It mounts only the
+  request's scratch directory (under `SOLOW_WORKTREE_ROOT`, where the mount guard always admits
+  it) plus the Profile's own `mounts` — no worktree, no repository, no transcript store.
+- **It is removed when the request ends,** in the request's own `finally`, scratch directory and
+  all.
+- **The sweep removes one nothing will come back for.** A one-shot has no Task row or registry
+  entry to be evidence of life, so the reaper judges it on its own enumeration by its claim: one
+  this process claimed is a request in flight and is left alone; one a crashed predecessor
+  claimed is removed after the twenty-second grace; and one older than an hour
+  (`ONE_SHOT_MAX_AGE_MS`) is removed whoever claims it, which covers a removal this process
+  itself failed to make.
+- **Settings' "Test" is unchanged.** Probing a Harness Profile on its own names no executor, and
+  stays a probe on the orchestrator's host.
+
+### The Task page's terminal (roadmap B4)
+
+The terminal runs where the Task runs. For a Local Executor Profile it is on the orchestrator's
+host, as before. For a Docker one it is a **terminal container** of its own
+(`openTerminalExecutor`): the run's image, limits, user and preflight, and the run's mounts — this
+Task's worktrees, its own clones, its transcript store and its checkpoint store, from
+`taskExecutorPlacement`, the function the run itself uses. The program is started with `docker
+exec -it` inside it.
+
+- **It never falls back to the host.** A container that cannot start, a kind with no driver, or a
+  Task whose Executor Profile cannot be read ends the socket with the reason on the pane. Before
+  this, a Docker Task's terminal opened on the host — the worktree is bind-mounted at its own path,
+  so there was a directory to open it in — and mounted the Task's conversation in the harness's
+  TUI there, holding the Task's credential, outside the container the profile asked for.
+- **It is never the Task's container.** Labelled `solow.role=terminal` and named for the
+  connection, so it is neither adopted by a run that starts while the window is open nor removed by
+  that run's `dispose()`, and two windows on one Task are two containers. It is removed when the
+  window closes, and anything the hang-up left running goes with it.
+- **The conversation mounts from the transcript store.** In a container the TUI resumes the
+  Task's newest conversation from the store the container sees at `$HOME/.claude/projects`, under
+  the container's own `HOME`, and only if the image has the harness; otherwise the pane says why
+  and opens bash (or `sh`) in the container. A conversation kept only in the operator's own
+  `~/.claude` is never resumed for a container Task — that would mean running the TUI on the host.
+- **The sweep removes one no window holds.** The evidence is the set of terminals this process
+  holds a socket for; a predecessor's terminal containers and one whose removal failed are missing
+  from it and are removed after the twenty-second grace. There is no age ceiling: a terminal is
+  legitimately open for hours.
+- **The environment travels by name.** The values are in the `docker` CLI's own environment under
+  a `SOLOW_ENV_` prefix and are read by `-e NAME`, so none is in the host's argv; `env -i` inside
+  replaces the image's environment with exactly the launch's. See
+  [0023](../decisions/0023-docker-executor-cli.md), the 2026-10-10 amendment.
 
 ### The isolation that holds, and where it stops
 
@@ -234,8 +396,8 @@ schema declares, then the shared prepare script and environment repeater.
   trivial.
 - As a user, I want to run a resource-heavy Task in a container, so it does not slow my
   machine.
-- As an Operator, I want harnesses to run on a designated remote host, so compute is where it
-  should be.
+- *(Later.)* As an Operator, I want harnesses to run on a designated remote host, so compute
+  is where it should be.
 
 ## Functional requirements
 

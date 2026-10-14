@@ -221,18 +221,18 @@ export const issueRouter = router({
       // one process that can remove the directories they named (Decision 0025).
       const held = await worktreesOfIssueTasks(ctx.rctx, input.id);
       const deleted = unwrap(await deleteIssue(ctx.rctx, input));
-      for (const { taskId, paths } of held) {
-        try {
-          await orchestrator.purgeTaskFiles({
+      // Never fatal: the Issue is gone, and a directory left behind is a disk cost, not a
+      // failed delete. There is nothing left to retry it from, which is the known price. Sent
+      // together, not one round trip per Task.
+      await Promise.allSettled(
+        held.map(({ taskId, paths }) =>
+          orchestrator.purgeTaskFiles({
             workspaceId: ctx.rctx.workspaceId,
             taskId,
             worktrees: paths,
-          });
-        } catch {
-          // Never fatal: the Issue is gone, and a directory left behind is a disk cost, not a
-          // failed delete. There is nothing left to retry it from, which is the known price.
-        }
-      }
+          }),
+        ),
+      );
       return deleted;
     }),
 

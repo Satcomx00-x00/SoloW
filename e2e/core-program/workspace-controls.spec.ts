@@ -38,7 +38,7 @@ async function ensureRepository(page: Page): Promise<void> {
 }
 
 test.describe("workspace controls", () => {
-  // Each of these walks several Tasks through real runs and page loads, and on the e2e
+  // Each of these walks several Tasks through real runs and page loads, and on the suite's former
   // `next dev` a page load costs 5–10 s and a tRPC batch 1–3 s: the runner's 180 s default
   // cut them off while still passing. The budget follows the walk, as the control check's does.
   test.describe.configure({ timeout: 6 * 60_000 });

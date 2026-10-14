@@ -11,7 +11,8 @@ bound the solution space.
 - **C-2 Own compute and data.** The system must run entirely on the user's machines with no
   required external service and no telemetry.
 - **C-3 Two deployment modes.** The same product must run locally (single user) and hosted
-  (multi-user), differing only in configuration.
+  (multi-user), differing only in configuration. *Hosted multi-user is Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)); the
+  constraint still shapes the design but nothing hosted is built.*
 - **C-4 Billing integrity.** A Subscription-mode harness must never be run in a way that causes
   metered billing.
 - **C-5 Credential isolation.** Harness-run code must never have access to raw credentials.

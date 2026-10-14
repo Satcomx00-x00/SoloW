@@ -1,7 +1,14 @@
 "use client";
 
-import type { ExecutorConfig, ExecutorKind, ExecutorProfileDto } from "@solow/contracts";
-import { Pencil, Trash2 } from "lucide-react";
+import {
+  type ExecutorConfig,
+  type ExecutorKind,
+  type ExecutorProfileDto,
+  LOCAL_EXECUTOR_NOTE,
+  preferredExecutorKind,
+  usableExecutorImage,
+} from "@solow/contracts";
+import { Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
@@ -15,7 +22,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
+import { useFlag } from "@/lib/use-flag";
 import { trpc } from "@/trpc/react";
 import { type EnvPair, EnvRows, fromEnvPairs, toEnvPairs } from "./env-rows";
 import { fromMountRows, type MountRow, MountRows, toMountRows } from "./mount-rows";
@@ -54,10 +63,15 @@ const RUNNABLE_KINDS: readonly ExecutorKind[] = ["local", "docker"];
  * Switch kinds without losing what the two kinds have in common. The prepare script and the
  * environment are shared by every member, so retyping them after a mis-click would be the form
  * punishing the user for exploring.
+ *
+ * A new Docker executor starts from the image the guided setup would use, when the daemon has it
+ * (`usableExecutorImage`): the one image known to carry the harnesses, rather than a blank field
+ * that has to be filled with a name the Owner may not know.
  */
 function blankConfig(
   kind: ExecutorKind,
   shared: { prepareScript?: string | undefined },
+  isolatedImage: string | null,
 ): ExecutorConfig {
   const base = {
     env: {},
@@ -67,7 +81,7 @@ function blankConfig(
     case "local":
       return { kind, ...base };
     case "docker":
-      return { kind, image: "", mounts: [], ...base };
+      return { kind, image: isolatedImage ?? "", mounts: [], ...base };
     case "ssh":
       return { kind, host: "", port: 22, user: "", keySecretId: "", ...base };
     case "cloud":
@@ -110,10 +124,26 @@ export function ExecutorProfilesSection() {
   const utils = trpc.useUtils();
   const list = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
   const secrets = trpc.secret.list.useQuery({});
+  const remoteEnvironments = useFlag("ff-remote-environments");
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [config, setConfig] = useState<ExecutorConfig>(blankConfig("local", {}));
+  /*
+   * What the Owner has chosen, or null while they have not chosen anything: a new Executor starts
+   * as Docker whenever a container runtime is reachable (roadmap B4), and the answer arrives after
+   * first paint, so the default is derived rather than copied into state once. `null` from the
+   * query means the orchestrator could not be asked, which is not the same as "no Docker" — but a
+   * form that cannot tell has to start somewhere, and the host is the only kind that needs no
+   * runtime to exist.
+   */
+  const availability = trpc.profile.executor.dockerAvailability.useQuery(undefined, {
+    staleTime: 30_000,
+    retry: false,
+  });
+  const preferredKind = preferredExecutorKind(availability.data?.available === true);
+  const [picked, setConfig] = useState<ExecutorConfig | null>(null);
+  const isolatedImage = usableExecutorImage(availability.data);
+  const config = picked ?? blankConfig(preferredKind, {}, isolatedImage);
   const [envPairs, setEnvPairs] = useState<EnvPair[]>([]);
   // Beside the config rather than inside it, for the reason `mount-rows.tsx` states: a row being
   // typed is not yet a mount, and the contract would refuse a config carrying one.
@@ -122,7 +152,7 @@ export function ExecutorProfilesSection() {
   const reset = () => {
     setEditingId(null);
     setName("");
-    setConfig(blankConfig("local", {}));
+    setConfig(null);
     setEnvPairs([]);
     setMountRows([]);
   };
@@ -247,7 +277,11 @@ export function ExecutorProfilesSection() {
                   </>
                 }
                 key={p.id}
-                meta={KIND_LABELS[p.kind]}
+                meta={
+                  p.kind === "local"
+                    ? `${KIND_LABELS[p.kind]} · trusted agents only`
+                    : KIND_LABELS[p.kind]
+                }
                 status={
                   <SectionStatus tone={drivable ? "idle" : "waiting"}>
                     {drivable ? "ready" : "no driver yet"}
@@ -262,7 +296,7 @@ export function ExecutorProfilesSection() {
 
       {remove.error && (
         <p className="text-destructive text-sm" role="alert">
-          {remove.error.message}
+          {describeError(remove.error)}
         </p>
       )}
 
@@ -293,9 +327,13 @@ export function ExecutorProfilesSection() {
             <Select
               onValueChange={(v) =>
                 setConfig(
-                  blankConfig(v as ExecutorKind, {
-                    ...(config.prepareScript ? { prepareScript: config.prepareScript } : {}),
-                  }),
+                  blankConfig(
+                    v as ExecutorKind,
+                    {
+                      ...(config.prepareScript ? { prepareScript: config.prepareScript } : {}),
+                    },
+                    isolatedImage,
+                  ),
                 )
               }
               value={config.kind}
@@ -304,15 +342,37 @@ export function ExecutorProfilesSection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(KIND_LABELS) as ExecutorKind[]).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {KIND_LABELS[k]}
-                    {RUNNABLE_KINDS.includes(k) ? "" : " · no driver yet"}
-                  </SelectItem>
-                ))}
+                {(Object.keys(KIND_LABELS) as ExecutorKind[])
+                  // Kinds without a driver stay out of the list unless `ff-remote-environments`
+                  // is on (decision 0031) — except the one a profile being edited already has.
+                  .filter(
+                    (k) => remoteEnvironments || RUNNABLE_KINDS.includes(k) || k === config.kind,
+                  )
+                  .map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {KIND_LABELS[k]}
+                      {RUNNABLE_KINDS.includes(k) ? "" : " · no driver yet"}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
+
+          {config.kind === "local" && (
+            <p
+              className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
+              role="note"
+            >
+              <ShieldAlert aria-hidden className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              <span>
+                {LOCAL_EXECUTOR_NOTE} The harness shares your account, so it can read the files and
+                credentials you can.
+                {availability.data?.available === false
+                  ? ` Docker was not found${availability.data.reason ? ` (${availability.data.reason})` : ""}, which is why this is the default.`
+                  : " Docker is the isolated alternative."}
+              </span>
+            </p>
+          )}
 
           {config.kind === "docker" && (
             <>
@@ -484,7 +544,7 @@ export function ExecutorProfilesSection() {
 
         {error && (
           <p className="text-destructive text-sm" role="alert">
-            {error.message}
+            {describeError(error)}
           </p>
         )}
       </SettingsCreate>

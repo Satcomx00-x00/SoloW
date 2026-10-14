@@ -4,8 +4,10 @@ import { describe, expect, it } from "bun:test";
 import type { SessionEventDto, TaskEvent } from "@solow/contracts";
 import {
   buildTranscript,
+  buildTranscriptFrom,
   inStepScope,
   type PermissionRow,
+  preparePersistedTranscript,
   type TextRow,
   type ToolRow,
 } from "./transcript";
@@ -255,5 +257,38 @@ describe("buildTranscript", () => {
       [],
     );
     expect(rows.map((r) => (r as TextRow).text)).toEqual(["round one", "round two"]);
+  });
+});
+
+/**
+ * The page prepares the persisted half once and folds each frame's live events into it, so the
+ * prepared half has to read the same on every frame and merge in order, not merely append.
+ */
+describe("buildTranscriptFrom", () => {
+  // Tool calls, so no two neighbouring rows are text and folded together.
+  const user = (seq: number, name: string, sessionId = "s1") =>
+    persisted(seq, { kind: "tool_call", name, callId: `c${seq}`, input: null }, sessionId);
+
+  it("merges live events into the persisted order, and leaves the prepared half as it was", () => {
+    const base = preparePersistedTranscript([user(3, "third"), user(1, "first", "s1")]);
+    const live = [
+      liveText(2, "second"),
+      liveText(1, "first again"),
+      liveText(0, "next round", undefined, "s2"),
+    ];
+
+    const once = buildTranscriptFrom(base, live);
+    const again = buildTranscriptFrom(base, live);
+    expect(once).toEqual(again);
+    expect(once).toEqual(buildTranscript([user(3, "third"), user(1, "first")], live));
+    // s1 in seq order with the live chunk between the persisted rows, the replayed seq 1 once,
+    // and the Session the socket introduced after it.
+    expect(once.map((row) => [row.sessionId, row.seq])).toEqual([
+      ["s1", 1],
+      ["s1", 2],
+      ["s1", 3],
+      ["s2", 0],
+    ]);
+    expect(base.normalised.map((n) => n.seq)).toEqual([1, 3]);
   });
 });

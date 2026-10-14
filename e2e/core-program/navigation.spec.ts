@@ -6,15 +6,10 @@ import { trpc } from "../support/flows.js";
  * drawer, in a real browser against the real app — the parts of the shell that only work if the
  * routes, the queries and the layout all agree.
  *
- * Every test also fails on an uncaught page error, so a page that renders but throws on the way
- * (a hydration mismatch, a query shape the client no longer understands) is not a pass.
+ * Every test also fails on an error the page reports, so a page that renders but complains on the
+ * way (a hydration mismatch, a duplicate key, a query shape the client no longer understands) is
+ * not a pass.
  */
-
-function failOnPageErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  return errors;
-}
 
 const sidebar = (page: Page) => page.getByRole("complementary", { name: "Sidebar" });
 const breadcrumb = (page: Page) => page.getByRole("navigation", { name: "Breadcrumb" });
@@ -34,10 +29,25 @@ async function dropProjects(page: Page, ids: readonly string[]): Promise<void> {
 }
 
 test.describe("navigation", () => {
+  // React reports a hydration mismatch or a duplicate key through `console.error`, not as a thrown
+  // error, so both are listened to. Checked after the test rather than at its end: the toast Next
+  // shows for one of them sits over the sidebar's Settings link, and a walk that then times out on
+  // that click must still name the error that caused it.
+  let errors: string[] = [];
+  test.beforeEach(({ page }) => {
+    errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+  });
+  test.afterEach(() => {
+    expect(errors).toEqual([]);
+  });
+
   test("every workspace page is one click from every other, and Settings leads back", async ({
     page,
   }) => {
-    const errors = failOnPageErrors(page);
     await page.goto("/projects");
     await expect(sidebar(page)).toBeVisible();
 
@@ -67,13 +77,11 @@ test.describe("navigation", () => {
 
     await sidebar(page).getByRole("link", { name: "All projects" }).click();
     await expect(page).toHaveURL(/\/projects$/);
-    expect(errors).toEqual([]);
   });
 
   test("a Project opens with its sections, switches keeping the section, and is in the trail", async ({
     page,
   }) => {
-    const errors = failOnPageErrors(page);
     const stamp = Date.now();
     await page.goto("/projects");
     const [a, b] = await twoProjects(page, stamp);
@@ -98,14 +106,12 @@ test.describe("navigation", () => {
       // The trail's root leads back to the list of Projects.
       await breadcrumb(page).getByRole("link", { name: "Projects" }).click();
       await expect(page).toHaveURL(/\/projects$/);
-      expect(errors).toEqual([]);
     } finally {
       await dropProjects(page, [a, b]);
     }
   });
 
   test("the command palette jumps straight to a Project's section", async ({ page }) => {
-    const errors = failOnPageErrors(page);
     const stamp = Date.now();
     await page.goto("/history");
     const [a, b] = await twoProjects(page, stamp);
@@ -116,7 +122,6 @@ test.describe("navigation", () => {
       await palette.getByRole("combobox").fill(`Nav B ${stamp}`);
       await palette.getByRole("option", { name: new RegExp(`Nav B ${stamp} › Issues`) }).click();
       await expect(page).toHaveURL(new RegExp(`/projects/${b}/issues$`));
-      expect(errors).toEqual([]);
     } finally {
       await dropProjects(page, [a, b]);
     }
@@ -125,7 +130,6 @@ test.describe("navigation", () => {
   test("the sidebar hides with Ctrl+B, stays hidden across a reload, and comes back", async ({
     page,
   }) => {
-    const errors = failOnPageErrors(page);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/projects");
     await expect(sidebar(page)).toBeVisible();
@@ -138,13 +142,11 @@ test.describe("navigation", () => {
 
     await page.getByRole("button", { name: "Show sidebar" }).click();
     await expect(sidebar(page)).toBeVisible();
-    expect(errors).toEqual([]);
   });
 
   test("on a phone the sidebar is a drawer that closes once you have gone somewhere", async ({
     page,
   }) => {
-    const errors = failOnPageErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/projects");
 
@@ -154,6 +156,5 @@ test.describe("navigation", () => {
     await drawer.getByRole("link", { name: "History" }).click();
     await expect(page).toHaveURL(/\/history$/);
     await expect(drawer).toBeHidden();
-    expect(errors).toEqual([]);
   });
 });

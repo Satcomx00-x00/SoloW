@@ -5,7 +5,7 @@ import { CommonErrorCode, issueSourceSchema } from "@solow/contracts";
 import { buildProjectHierarchy } from "@solow/core";
 import { ChevronRight, ListFilter, Search, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { FlagDisabled } from "@/components/features/shared/flag-disabled";
@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import {
   ISSUE_STATUS_LABELS,
   ISSUE_STATUS_STYLE,
@@ -83,6 +84,12 @@ export function readFilters(params: URLSearchParams): IssueFilters {
   };
 }
 
+/**
+ * The filters as a URL's search part — `?…`, or nothing. Without a path on purpose: the view is
+ * mounted at a Project's issue list and at Unassigned, and a filter belongs to whichever page it
+ * was set on. It used to answer `/issues?…`, a route that went when the lists moved under their
+ * Projects, so every filter and status tab led to a 404.
+ */
 export function toSearchParams(filters: IssueFilters): string {
   const next = new URLSearchParams();
   if (filters.status) next.set("status", filters.status);
@@ -90,14 +97,14 @@ export function toSearchParams(filters: IssueFilters): string {
   if (filters.source) next.set("source", filters.source);
   for (const label of filters.labels) next.append("label", label);
   const query = next.toString();
-  return query ? `/issues?${query}` : "/issues";
+  return query ? `?${query}` : "";
 }
 
-function StatusFilter({ filters }: { filters: IssueFilters }) {
+function StatusFilter({ filters, pathname }: { filters: IssueFilters; pathname: string }) {
   const tab = (status: IssueStatus | null, label: string) => (
     <Link
       key={label}
-      href={toSearchParams({ ...filters, status })}
+      href={`${pathname}${toSearchParams({ ...filters, status })}`}
       scroll={false}
       aria-current={filters.status === status ? "page" : undefined}
       className={cn(
@@ -281,6 +288,21 @@ export function nestIssues(issues: readonly IssueDto[]): Array<{ issue: IssueDto
   return flat;
 }
 
+/**
+ * A row draws only when it is near the viewport: a list holds up to 500 cards, and every one was
+ * laid out and painted on every render, scrolled into view or not.
+ *
+ * `content-visibility` brings paint containment with it, which clips to the element — and the
+ * card's hover shadow reaches 32px below it, 24px to each side, its lift and focus ring above. So
+ * the `li` is padded out to hold all of that, and pulled back by margins, which leaves the layout
+ * as it was. Between two rows the negative margins collapse into the larger one, so the bottom
+ * margin alone cancels both paddings, less the 8px gap the list always had.
+ * The padding of one row overlaps its neighbours, so the row takes no pointer events and the card
+ * takes them back.
+ */
+const ROW_CLASS =
+  "pointer-events-none -mx-6 -mt-4 -mb-10 px-6 pt-4 pb-8 last:-mb-8 [contain-intrinsic-size:auto_62px] [content-visibility:auto]";
+
 function IssueRow({
   issue,
   depth = 0,
@@ -293,13 +315,13 @@ function IssueRow({
 }) {
   const { icon: Icon, text } = ISSUE_STATUS_STYLE[issue.status];
   return (
-    <li>
+    <li className={ROW_CLASS}>
       <Link
         href={`/issues/${issue.id}`}
         // Indented rather than drawn in a nested list: one column of titles stays scannable, and
         // the indent is the whole signal that this row belongs to the one above it.
         style={depth > 0 ? { marginLeft: depth * 24 } : undefined}
-        className="group flex items-start gap-3 rounded-lg border bg-card px-3.5 py-3 transition-all duration-150 hover:-translate-y-px hover:border-ring/35 hover:shadow-panel"
+        className="group pointer-events-auto flex items-start gap-3 rounded-lg border bg-card px-3.5 py-3 transition-all duration-150 hover:-translate-y-px hover:border-ring/35 hover:shadow-panel"
       >
         <Icon aria-hidden strokeWidth={2.25} className={cn("mt-0.5 size-4 shrink-0", text)} />
         <div className="min-w-0 flex-1">
@@ -353,11 +375,12 @@ export function IssuesView({
 } = {}) {
   const providerName = useProviderNames();
   const router = useRouter();
+  const pathname = usePathname();
   const params = useSearchParams();
   const filters = readFilters(new URLSearchParams(params.toString()));
 
   const apply: Apply = (next) =>
-    router.replace(toSearchParams({ ...filters, ...next }), { scroll: false });
+    router.replace(`${pathname}${toSearchParams({ ...filters, ...next })}`, { scroll: false });
 
   const issues = trpc.issue.list.useQuery({
     ...WHOLE_PAGE,
@@ -384,6 +407,8 @@ export function IssuesView({
     () => Object.fromEntries((labelVocabulary.data ?? []).map((l) => [l.name, l.color])),
     [labelVocabulary.data],
   );
+  // Once per read, not per render: nesting walks every issue on the page, up to 500 of them.
+  const nested = useMemo(() => nestIssues(issues.data?.items ?? []), [issues.data]);
   const utils = trpc.useUtils();
 
   /**
@@ -403,7 +428,7 @@ export function IssuesView({
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-6 py-5">
       <div className="space-y-3">
-        <StatusFilter filters={filters} />
+        <StatusFilter filters={filters} pathname={pathname} />
         <FilterBar
           filters={filters}
           apply={apply}
@@ -430,9 +455,7 @@ export function IssuesView({
             <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
             <div>
               <p className="font-medium">Failed to load issues</p>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                {issues.error.message}
-              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{describeError(issues.error)}</p>
             </div>
           </div>
         ))}
@@ -459,8 +482,8 @@ export function IssuesView({
                   : ""}
               </p>
             )}
-            <ul className="space-y-2">
-              {nestIssues(issues.data.items).map(({ issue, depth }) => (
+            <ul>
+              {nested.map(({ issue, depth }) => (
                 <IssueRow key={issue.id} issue={issue} depth={depth} colours={labelColours} />
               ))}
             </ul>

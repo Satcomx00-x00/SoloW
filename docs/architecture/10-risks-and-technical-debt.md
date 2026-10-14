@@ -31,7 +31,7 @@ This section records known risks and areas to watch. It is revisited as the prod
   core product never depends on them ([F12](../features/F12-integrations.md)).
 
 - **R-6 Two-deployment complexity.** Supporting local and hosted from one product adds
-  configuration surface. *Mitigation:* one data model with two stores, and identical feature
+  configuration surface. *Deferred with hosting, which is Later ([0031](../decisions/0031-focus-on-the-solo-power-user.md)).* *Mitigation:* one data model with two stores, and identical feature
   behaviour across modes ([Decision 0008](../decisions/0008-data-store-strategy.md)).
 
 ## Technical debt (to track)

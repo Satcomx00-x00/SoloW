@@ -5,8 +5,11 @@ import {
   awaitWorkflowGate,
   connectRepository,
   createTask,
+  deleteWorkflow,
+  expectTaskDeleted,
   gateButton,
   openTask,
+  openTaskReadyToDelete,
   openWorkspaceTab,
   sessionLog,
   showStepOnBoard,
@@ -20,10 +23,11 @@ import {
  * launched through that Workflow, every Step's output read back, the change approved onto a
  * branch, the Issue closed, and everything it created removed again.
  *
- * It is not part of the CI suite (`playwright.config.ts` ignores `e2e/control/` unless
+ * It is not part of the default suite (`playwright.config.ts` ignores `e2e/control/` unless
  * `SOLOW_CONTROL_CHECK=1`), and it is not a unit of anything: the point is the whole line, so
  * one test walks it end to end and each phase is a `test.step` so the report says where it broke.
- * Run it with `make control-check` before a commit to main that touches the loop.
+ * Run it with `make control-check` before a commit to main that touches the loop; CI runs it on
+ * every push to main and a red one blocks the release.
  *
  * What is real: the SPA, tRPC, the DAL, the orchestrator's `runTaskLifecycle`, the Workflow
  * advance, the worktree manager and git. What is not: the harness, which is the deterministic
@@ -59,8 +63,8 @@ test.describe("control check — the main line of the product, end to end", () =
   }) => {
     // Ten minutes of real product on this host — a Task walked through a Workflow, every
     // step's output read, the change approved, everything cleaned up — and the runner's 600s
-    // default was cutting it at the last `goto` whenever it ran second. Host-only, never a CI
-    // gate, so the budget follows the walk (the branching check sets its own the same way).
+    // default was cutting it at the last `goto` whenever it ran second. The budget follows the
+    // walk (the branching check sets its own the same way).
     test.setTimeout(20 * 60_000);
     const stamp = Date.now();
     const projectTitle = `Control check ${stamp}`;
@@ -95,7 +99,7 @@ test.describe("control check — the main line of the product, end to end", () =
       const dialog = page.getByRole("dialog", { name: "Create a project" });
       await dialog.getByLabel("Project name").fill(projectTitle);
       await dialog.getByRole("button", { name: "Create" }).click();
-      await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/);
+      await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/, { timeout: 90_000 });
       projectId = new URL(page.url()).pathname.split("/")[2] ?? "";
       expect(projectId).not.toBe("");
 
@@ -340,23 +344,22 @@ test.describe("control check — the main line of the product, end to end", () =
 
     await test.step("remove everything the check created", async () => {
       // The Task first: an Issue with Tasks refuses to go, and a Workflow a Task follows too.
-      await page.goto(`/task/${taskId}`);
       // No dialog: a finished Task with nothing waiting on it goes to History on the press,
       // with Undo on a toast — the dialog is only for a running harness or a dependant. Undo
-      // once, to prove the toast means it; then delete for real. The board the delete lands on
-      // is visited first, so its first compile under `next dev` does not eat the toast's ten
-      // seconds.
-      await page.goto(`/projects/${projectId}/board`);
-      await page.goto(`/task/${taskId}`);
-      await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+      // once, to prove the toast means it; then delete for real.
+      const ready = { taskId, title: taskTitle, destination: `/projects/${projectId}/board` };
+      await openTaskReadyToDelete(page, ready);
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
+      await expectTaskDeleted(page, taskId, true);
       const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
       await toast.getByRole("button", { name: "Undo" }).click();
-      await page.goto(`/task/${taskId}`);
+      // Settled on the server before the next `goto`, so the restore is not left in flight.
+      await expectTaskDeleted(page, taskId, false);
+      await openTaskReadyToDelete(page, ready);
       await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      // Leaving lands on the board, which the e2e `next dev` may be cold-compiling at this
-      // moment (10–20 s on this host); the default 30 s expect has timed out on that alone.
+      await expectTaskDeleted(page, taskId, true);
+      // The board was compiled moments ago, but a loaded runner can still be slow to serve it.
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
 
       await page.goto(`/issues/${issueId}`);
@@ -364,12 +367,7 @@ test.describe("control check — the main line of the product, end to end", () =
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete issue" }).click();
       await expect(page).not.toHaveURL(new RegExp(`/issues/${issueId}$`));
 
-      await page.goto(`/workflows/${workflowId}`);
-      // The sidebar's own control for the pipeline; the inspector's is behind a panel that may
-      // still be loading the Steps.
-      await page.getByRole("button", { name: "Delete workflow", exact: true }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
-      await expect(page.getByRole("link", { name: new RegExp(workflowName) })).toHaveCount(0);
+      await deleteWorkflow(page, workflowId, workflowName);
 
       await page.goto(`/projects/${projectId}`);
       await page.getByRole("button", { name: "Delete", exact: true }).click();

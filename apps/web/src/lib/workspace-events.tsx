@@ -1,6 +1,7 @@
 "use client";
 
 import type { TaskEvent } from "@solow/contracts";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -54,6 +55,24 @@ export function WorkspaceEventsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const { status } = useEventStream({ onEvent });
+
+  /*
+   * Caught up after a reconnect, since the channel does not replay what it missed.
+   *
+   * Every consumer here re-reads on a frame, so a socket that drops — a laptop lid, an
+   * orchestrator restart — leaves each of them showing whatever was true before the drop, and the
+   * frames that would have corrected them are gone. Coming back is therefore when everything on
+   * screen is re-read, once. Not on the first open: the page's queries have only just answered,
+   * and doubling every page load to cover the instant between them and the socket is a poor trade
+   * — the Task page, where that instant decides what the step strip shows, covers it itself.
+   */
+  const queryClient = useQueryClient();
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (status !== "open") return;
+    if (wasOpen.current) void queryClient.invalidateQueries({ type: "active" });
+    wasOpen.current = true;
+  }, [status, queryClient]);
 
   const value = useMemo<WorkspaceEvents>(
     () => ({

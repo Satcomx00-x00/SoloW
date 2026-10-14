@@ -1,9 +1,9 @@
 import "server-only";
-import { ReviewErrorCode, reviewDecisionInput, reviewDto } from "@solow/contracts";
+import { ReviewErrorCode, reviewDecisionInput, reviewDto, TaskErrorCode } from "@solow/contracts";
 import { TRPCError } from "@trpc/server";
 import { forgetReview, recordReview } from "../dal/review.js";
 import { getSessionById, setSessionState } from "../dal/session.js";
-import { claimTaskState, getTaskById, updateTaskState } from "../dal/task.js";
+import { claimTaskRun, claimTaskState, getTaskById, updateTaskState } from "../dal/task.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 import { requireUnblocked } from "./task.js";
@@ -73,8 +73,23 @@ export const reviewRouter = router({
       }
 
       // Take the gate. Whoever loses this write decided on a gate that is no longer open.
-      const claimed = await claimTaskState(ctx.rctx, session.taskId, ["review"], "running");
+      //
+      // A decision that sends a harness back to work is a start, so it takes a slot under the
+      // Harness Profile's concurrency cap in the same write (F5): `request_changes` always, and an
+      // approval under a Workflow, whose run may brief the next Step's harness or have this one
+      // apply the settled decisions. A rejection and a plain approval run no harness — one
+      // discards, the other commits — so holding them at the gate for a limit on harness spend
+      // would strand finished work for nothing.
+      const startsHarness =
+        input.decision === "request_changes" ||
+        (input.decision === "approve" && current.workflowId !== null);
+      const claimed = startsHarness
+        ? await claimTaskRun(ctx.rctx, session.taskId, ["review"])
+        : await claimTaskState(ctx.rctx, session.taskId, ["review"], "running");
       if (!claimed.ok) {
+        if (claimed.error === TaskErrorCode.ConcurrencyCapReached) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: claimed.error });
+        }
         throw new TRPCError({ code: "CONFLICT", message: ReviewErrorCode.NotInReview });
       }
       // The Session is live again: a run is about to work in it. Left `awaiting_review`, a run
@@ -104,11 +119,12 @@ export const reviewRouter = router({
         await setSessionState(ctx.rctx, input.sessionId, session.state);
         await updateTaskState(ctx.rctx, session.taskId, "review", {
           failureReason: current.failureReason ?? null,
+          completedAt: current.completedAt,
         });
         throw cause;
       }
 
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: session.taskId,
         state: "running",

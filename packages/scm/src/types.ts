@@ -629,6 +629,35 @@ export interface RepositoriesCapability {
  */
 export interface ChangeRequestsCapability {
   listChangeRequests(credential: ScmCredential, repo: RepoRef): Promise<ExternalChangeRequest[]>;
+  /**
+   * Open the change request for a branch, or update the one already open for it (A1).
+   *
+   * One call that decides which, because approval can run more than once for the same branch — a
+   * reopened Task, a redelivered event — and a second POST would either fail on a duplicate or,
+   * worse on some providers, open a second request for the same work. The open one for `head` is
+   * found first and refreshed; only when there is none is one created.
+   *
+   * Answers with what the provider now holds, not what was sent (the rule every write here
+   * follows), plus whether this call created it.
+   */
+  upsertChangeRequest(
+    credential: ScmCredential,
+    repo: RepoRef,
+    input: ChangeRequestInput,
+  ): Promise<{ changeRequest: ExternalChangeRequest; created: boolean }>;
+}
+
+export interface ChangeRequestInput {
+  /** The branch carrying the change. Must already be on the provider. */
+  head: string;
+  /** The branch to merge into; the repository's default branch when absent. */
+  base?: string;
+  title: string;
+  /**
+   * Markdown. Written only when the request is opened: the title and description of a request
+   * that is already open are left alone, because by then a reviewer may have edited them.
+   */
+  body: string;
 }
 
 /**

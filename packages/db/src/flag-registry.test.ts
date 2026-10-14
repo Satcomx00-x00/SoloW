@@ -1,6 +1,13 @@
 /// <reference types="bun-types" />
 import { describe, expect, it } from "bun:test";
-import { FLAGS, type FlagKey, flagKeys, isEnabled, isFlagKey } from "./flag-registry.js";
+import {
+  FLAGS,
+  type FlagKey,
+  flagKeys,
+  HIDDEN_UNTIL_READY,
+  isEnabled,
+  isFlagKey,
+} from "./flag-registry.js";
 
 /**
  * The flag registry's own contract (constitution v1.5.0).
@@ -15,7 +22,7 @@ import { FLAGS, type FlagKey, flagKeys, isEnabled, isFlagKey } from "./flag-regi
  */
 
 describe("the flag registry", () => {
-  it("defaults every registered flag ON", () => {
+  it("defaults every registered flag ON, except the ones hidden until ready", () => {
     /*
      * The drift guard, and the reason this test is worth more than it looks.
      *
@@ -25,7 +32,7 @@ describe("the flag registry", () => {
      * everywhere. This is the only thing standing between that and main.
      */
     const off = flagKeys().filter((key) => !FLAGS[key].default);
-    expect(off).toEqual([]);
+    expect(off).toEqual([...HIDDEN_UNTIL_READY]);
   });
 
   it("keeps the key, the record and the map in step", () => {

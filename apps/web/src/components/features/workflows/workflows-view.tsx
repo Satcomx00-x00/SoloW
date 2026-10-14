@@ -1,14 +1,23 @@
 "use client";
 
 import { CommonErrorCode } from "@solow/contracts";
-import { TriangleAlert, Workflow as WorkflowIcon } from "lucide-react";
+import { ArrowLeft, TriangleAlert, Workflow as WorkflowIcon } from "lucide-react";
+import Link from "next/link";
 import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { WorkflowInspector } from "@/components/features/workflows/workflow-inspector";
 import { HeaderActions } from "@/components/shell/header-actions";
 import { SecondaryPanel } from "@/components/shell/secondary-sidebar";
+import { Button } from "@/components/ui/button";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { WorkflowCanvas } from "./workflow-canvas";
 import { WorkflowCreateActions } from "./workflow-create-actions";
+
+/** Here the thing that went missing is a Workflow, so the shared sentence can say so. */
+const WORKFLOW_WORDING = {
+  [CommonErrorCode.NotFound]:
+    "This workflow no longer exists — it may have been deleted, or the link is out of date.",
+};
 
 /**
  * The Workflows surface (issue #5, spec F03).
@@ -30,9 +39,20 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
   const list = workflows.data ?? [];
 
   // The route names a Workflow; `/workflows` names none and opens on the first, so the surface is
-  // never an empty frame when there is something to draw. A stale id — deleted in another tab —
-  // falls back the same way rather than leaving the canvas on a NOT_FOUND forever.
-  const selected = list.find((w) => w.id === workflowId) ?? list[0] ?? null;
+  // never an empty frame when there is something to draw.
+  //
+  // A stale id — deleted in another tab, or an old link — used to fall back to the first one too,
+  // which drew a *different* pipeline under a URL naming this one, and let an edit land on it
+  // without the Owner noticing. It is said instead, with the way out. Not while the list is
+  // refetching: creating a Workflow navigates to it before the refreshed list has arrived.
+  const missing =
+    workflowId !== undefined &&
+    workflows.isSuccess &&
+    !workflows.isFetching &&
+    !list.some((w) => w.id === workflowId);
+  const selected = missing
+    ? null
+    : (list.find((w) => w.id === workflowId) ?? (workflowId ? null : list[0]) ?? null);
   const detail = trpc.workflow.get.useQuery(
     { id: selected?.id ?? "" },
     { enabled: selected !== null },
@@ -54,9 +74,7 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
         <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
         <div role="alert">
           <p className="font-medium">Failed to load workflows</p>
-          <p className="mt-0.5 font-mono text-muted-foreground text-xs">
-            {workflows.error.message}
-          </p>
+          <p className="mt-0.5 text-muted-foreground text-xs">{describeError(workflows.error)}</p>
         </div>
       </div>
     );
@@ -76,6 +94,31 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
     );
   }
 
+  // Without this, a Workflow deleted between the list and its read sat on "Loading steps…" for
+  // good: NOT_FOUND is not retried, so nothing would ever replace the line.
+  if (missing || (selected && detail.error)) {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl items-start gap-2.5 px-6 py-10 text-sm">
+        {actions}
+        <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
+        <div role="alert" className="space-y-3">
+          <div>
+            <p className="font-medium">Workflow not available</p>
+            <p className="mt-0.5 text-muted-foreground text-xs">
+              {describeError(missing ? CommonErrorCode.NotFound : detail.error, WORKFLOW_WORDING)}
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/workflows">
+              <ArrowLeft /> All workflows
+            </Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const waiting = workflows.isLoading || (workflowId !== undefined && !selected);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
       {actions}
@@ -83,11 +126,11 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
       <p className="text-muted-foreground text-sm">
         {selected
           ? "Loading steps…"
-          : workflows.isLoading
+          : waiting
             ? "Loading workflows…"
             : "No workflows yet. A workflow chains harnesses: one plans, another implements, a third reviews."}
       </p>
-      {!selected && !workflows.isLoading && (
+      {!selected && !waiting && (
         <p className="text-muted-foreground/70 text-xs">Start one with New workflow, above.</p>
       )}
     </div>

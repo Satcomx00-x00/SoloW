@@ -65,6 +65,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$file"
+          # The single quotes keep the shell off the script; the ${...} in it are JavaScript's.
+          # shellcheck disable=SC2016
           git commit -m "chore(store): refresh vendored Skills from upstream" \
             -m "$(bun -e 'const s=require("./packages/core/src/workflow-store/vendored.generated.json");for(const [id,src] of Object.entries(s.sources)) if(src.commit) console.log(`${id}: ${src.repository}@${src.commit.slice(0,12)}`)')"
           git push origin HEAD:main

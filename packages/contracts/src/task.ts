@@ -237,6 +237,13 @@ export const retryTaskInput = z.object({ id: idSchema });
 export type RetryTaskInput = z.infer<typeof retryTaskInput>;
 
 /**
+ * The two ways out of an approval that committed and did not ship (A1): `task.redeliver` pushes
+ * and opens the request again, `task.keepLocal` accepts the commit on this machine as the result.
+ */
+export const redeliverTaskInput = z.object({ id: idSchema });
+export type RedeliverTaskInput = z.infer<typeof redeliverTaskInput>;
+
+/**
  * Delete a Task outright — the board and the Task page both offer it, so a Task no longer has to
  * be deleted by way of the Issue above it.
  *
@@ -323,6 +330,13 @@ export const taskRepositoryDto = z.object({
   baseRef: z.string().nullable(),
   checkoutBranch: z.string(),
   resultBranch: z.string().nullable(),
+  /**
+   * The pull or merge request approval opened for `resultBranch` (A1). Absent or null on a
+   * Repository with no remote, where approval is a local commit and the UI says so. Optional so a
+   * client built before the field existed still parses a row.
+   */
+  changeRequestUrl: z.string().nullable().optional(),
+  changeRequestNumber: z.number().int().nullable().optional(),
   position: z.number().int().nonnegative(),
 });
 export type TaskRepositoryDto = z.infer<typeof taskRepositoryDto>;
@@ -504,3 +518,36 @@ export type HistoryEntryDto = z.infer<typeof historyEntryDto>;
 
 export const historyListDto = z.array(historyEntryDto);
 export type HistoryListDto = z.infer<typeof historyListDto>;
+
+/**
+ * Quick task: one sentence becomes an Issue, a Task and a running harness (roadmap E2).
+ *
+ * Deliberately not a new kind of record. The server composes the existing Issue and Task writes,
+ * so everything downstream (board, review, Approve) sees an ordinary Task under an ordinary local
+ * Issue. `repositoryId` is optional only because a Workspace with exactly one Repository has no
+ * question to ask; with several, the server refuses rather than guessing which one to run in.
+ * Harness and Executor Profiles are never asked for: `quickTaskProfiles` picks them — the Owner's
+ * stored defaults, else the oldest Harness Profile and a Docker executor when there is one.
+ */
+export const quickTaskInput = z.object({
+  prompt: z.string().trim().min(1).max(5_000),
+  repositoryId: idSchema.optional(),
+});
+export type QuickTaskInput = z.infer<typeof quickTaskInput>;
+
+/**
+ * What `task.quickStart` answers: the Task and the Issue made for it, and whether the run started.
+ *
+ * A start can be refused after both are written — the Harness Profile at its cap, a blocker, an
+ * orchestrator that is down — and then the Task is left Ready, where Launch retries it. That is an
+ * answer rather than an error, because a thrown error after the writes left the caller holding a
+ * Task it did not know existed, and its retry made a second one. `reason` is the refusal's wire
+ * code, null when the run started.
+ */
+export const quickTaskDto = z.object({
+  task: taskDto,
+  issueId: idSchema,
+  started: z.boolean(),
+  reason: z.string().nullable(),
+});
+export type QuickTaskDto = z.infer<typeof quickTaskDto>;

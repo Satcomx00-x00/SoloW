@@ -165,11 +165,17 @@ await bundle(
 console.log("\n[3/4] database entry points");
 await bundle(join(ROOT, "packages", "db", "src", "migrate.ts"), join(DIST, "db", "migrate.js"));
 await bundle(join(ROOT, "packages", "db", "src", "bootstrap.ts"), join(DIST, "db", "bootstrap.js"));
+await bundle(join(ROOT, "packages", "db", "src", "backup-cli.ts"), join(DIST, "db", "backup.js"));
 
 console.log("\n[4/4] migrations");
 // `migrate.js` resolves this as `../migrations` from its own location, so the layout here is
 // load-bearing: dist/db/migrate.js alongside dist/migrations/.
 await cp(join(ROOT, "packages", "db", "migrations"), join(DIST, "migrations"), { recursive: true });
+
+// `solow executor-image` builds from this copy: someone who installed with npx has no checkout to
+// build the isolated executor's image from.
+await mkdir(join(DIST, "executor"), { recursive: true });
+await cp(join(ROOT, "docker", "executor", "Dockerfile"), join(DIST, "executor", "Dockerfile"));
 
 /*
  * The tarball has to be able to *resolve* what it ships, not merely contain it.

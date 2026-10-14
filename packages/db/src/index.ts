@@ -66,8 +66,15 @@ export function createDb() {
 
 export type Db = ReturnType<typeof createDb>;
 
+export { activeWorktreeOf } from "./active-worktree.js";
 export * from "./auth-schema.js";
-export { bootstrapWorkspace, LOCAL_WORKSPACE_ID } from "./bootstrap.js";
+export {
+  bootstrapWorkspace,
+  LOCAL_OWNER_ID,
+  LOCAL_WORKSPACE_ID,
+  provisionOwnerWorkspace,
+  seedWorkspaceDefaults,
+} from "./bootstrap.js";
 export { dbEnv } from "./env.js";
 export {
   FLAGS,
@@ -75,6 +82,7 @@ export {
   type FlagDefinition,
   type FlagKey,
   flagKeys,
+  HIDDEN_UNTIL_READY,
   isEnabled,
   isFlagKey,
 } from "./flag-registry.js";
@@ -90,6 +98,15 @@ export {
 } from "./harness-catalog-defaults.js";
 export { type HarnessConfigForRun, loadHarnessConfigForRun } from "./harness-config-run.js";
 export { loadHarnessLibrariesForRun } from "./harness-library-run.js";
+export {
+  HISTORY_PRUNE_BATCH,
+  HISTORY_PRUNE_MAX_EVENTS,
+  type HistoryPruneOptions,
+  type HistoryPruneReport,
+  historyPruneCutoff,
+  previewHistoryPrune,
+  pruneHistory,
+} from "./history-prune.js";
 export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
 export {
   type GeneratedMcpToken,
@@ -107,6 +124,7 @@ export { schema } from "./schema.js";
 export { decryptForHarnessRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
 export { allTables } from "./tables.js";
 export { cascadeDeleteTasks } from "./task-cascade.js";
+export { claimTaskRunSlot, type TaskRunClaim } from "./task-claim.js";
 export { DEFAULT_WORKFLOWS, ensureDefaultWorkflows } from "./workflow-defaults.js";
 export {
   advanceTaskWorkflow,

@@ -3,10 +3,10 @@
 
 SHELL := bash
 .DEFAULT_GOAL := help
-.PHONY: help install clean build lint format typecheck test smoke smoke-tarball smoke-docker \
-	test-docker-live e2e e2e-critical control-check \
+.PHONY: help install clean build lint format typecheck test test-web smoke smoke-tarball smoke-docker \
+	test-docker-live executor-image e2e e2e-critical control-check \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
-	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check \
+	dev-orchestrator update db-generate db-migrate db-bootstrap backup restore openapi openapi-check \
 	store-sync store-check
 
 help: ## Show this help
@@ -39,11 +39,14 @@ build: install store-sync lint typecheck db-generate openapi-check ## Install, s
 test: ## Run all unit tests (per-package, picks up each bunfig preload)
 	bun run test
 
+test-web: ## Run only the web app's unit tests, in the memory-safe batches `make test` uses
+	bun run scripts/test-batches.ts apps/web
+
 smoke: ## Run the smoke tests: the core loop (in-memory DB, fake agent, temp git repo), then the API's navigation path
 	bun run scripts/smoke.ts
 	cd apps/web && bun test src/server/api.smoke.test.ts
 
-smoke-tarball: ## Pack the CLI, install the tarball into a clean dir, and boot it (needs a build first)
+smoke-tarball: ## Pack the CLI (or take SMOKE_TARBALL), install it into a clean dir, and boot it (needs a build first)
 	./scripts/smoke-tarball.sh
 
 smoke-docker: ## Drive the Docker executor against a live daemon (SMOKE_DOCKER_REQUIRED=1 to forbid the skip)
@@ -71,18 +74,28 @@ test-docker-live: ## Run the Executor contract against a live daemon (SMOKE_DOCK
 		echo "test-docker-live SKIPPED — no reachable Docker daemon (SMOKE_DOCKER_REQUIRED=1 forbids this skip)."; \
 	fi
 
+# The image the guided setup runs Claude in, from `docker/executor/Dockerfile`, checked afterwards
+# by running both harnesses as your uid with a tmpfs HOME, the way a Task runs them. The same code
+# as `npx @satcomx00-x00/solow executor-image`, so the two cannot build different things. Tagged
+# `solow-executor:local`, or `$SOLOW_EXECUTOR_IMAGE` — the orchestrator reads the same variable to
+# decide which image to look for. Run `make smoke-docker SMOKE_DOCKER_IMAGE=solow-executor:local`
+# afterwards to put it through the driver's own preflight.
+executor-image: ## Build the Docker executor's image with Claude Code and opencode (solow-executor:local)
+	bun packages/cli/bin/solow.mjs executor-image
+
 e2e: ## Run the Playwright E2E suite (boots the SPA + an orchestrator harness)
 	bunx playwright test
 
 e2e-critical: ## Run only the @critical isolation E2E — this one blocks merge
 	bunx playwright test --grep @critical
 
-# Not a CI gate: the operator's own check, on this host, before a commit to main that touches
-# the loop. One test walks the main line end to end — Project, Issue, a two-Step Workflow drawn
-# on the canvas, a Task launched through it, every Step's output, approval onto a branch, the
-# Issue closed, everything removed — against the same servers and fixture the E2E suite boots.
-control-check: ## Walk the product's main line end to end on this host (not run in CI)
-	SOLOW_CONTROL_CHECK=1 bunx playwright test --grep @control
+# The main line walked end to end — Project, Issue, a Workflow drawn on the canvas, a Task
+# launched through it, every Step's output, approval onto a branch, the Issue closed, everything
+# removed — against the same servers and fixture the E2E suite boots. Run it on this host before
+# a commit to main that touches the loop; CI runs it on every push to main, one spec per runner
+# (`CONTROL_SPEC=e2e/control/<name>.spec.ts`), and a red one blocks the release.
+control-check: ## Walk the product's main line end to end (CONTROL_SPEC=<file> for one spec)
+	SOLOW_CONTROL_CHECK=1 bunx playwright test --grep @control $(CONTROL_SPEC)
 
 audit: ## Dependency audit at the project severity threshold
 	bun run audit
@@ -107,7 +120,7 @@ secretscan: ## Scan the repository and its history for committed secrets
 verify: lint store-check typecheck test smoke smoke-docker test-docker-live openapi-check audit audit-executor-boundary audit-provider-branching secretscan e2e ## Every quality gate, in order
 	@echo "all quality gates passed"
 
-dev: ## Start ALL services (web :5000 + orchestrator :5001 + Inngest Dev Server :8288) with hot reload; auto-migrates+seeds
+dev: ## Start ALL services (web :5000 + orchestrator :5001 + Inngest server :8288) with hot reload; auto-migrates+seeds
 	bun run dev
 
 dev-web: ## Start only the web app (SPA + API) on :5000
@@ -128,6 +141,14 @@ db-migrate: ## Apply migrations to the local SQLite database
 
 db-bootstrap: ## Create the local Workspace and its agent catalog (idempotent)
 	bun run db:bootstrap
+
+# The data folder is $SOLOW_HOME, default .solow/ (docs/operations/backup-and-restore.md). A backup
+# is safe while the stack runs; a restore refuses to, and keeps what it replaced as a backup.
+backup: ## Back up the database, keys and engine state into .solow/backups (OUT=<dir> elsewhere)
+	sh scripts/backup.sh backup $(if $(OUT),--out "$(OUT)")
+
+restore: ## Restore a backup: make restore FROM=<name or dir> (lists them without FROM; stack must be stopped)
+	sh scripts/backup.sh restore $(if $(FROM),"$(FROM)")
 
 flags: ## List feature flags per Workspace (enable: bun run flag enable ff-core-program)
 	bun run flag list

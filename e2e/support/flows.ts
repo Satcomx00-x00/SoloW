@@ -126,6 +126,60 @@ export async function openTask(page: Page, issueId: string, title: string): Prom
 }
 
 /**
+ * Wait until the server says the Task is in History (`deleted`) or live again — the outcome,
+ * not the network. A tRPC batch's body is cancelled by the client once it has parsed every
+ * result, so a call the server answered can still read as aborted to the browser, and no
+ * request event tells "done" from "never reached the server".
+ */
+export async function expectTaskDeleted(page: Page, taskId: string, deleted: boolean) {
+  await expect
+    .poll(
+      async () =>
+        (
+          await trpc<{ deletedAt: string | null }>(
+            page,
+            "task.get",
+            { id: taskId, includeDeleted: true },
+            "query",
+          )
+        ).deletedAt !== null,
+      { timeout: 30_000 },
+    )
+    .toBe(deleted);
+}
+
+/**
+ * Open a Task's page ready for its delete button, which navigates to `destination`.
+ *
+ * Where the delete goes depends on the Task's Project, which the page reads only once the Task
+ * has loaded: pressed before that, the delete goes to `/projects` — so the button's own
+ * `data-after-delete` is waited on.
+ */
+export async function openTaskReadyToDelete(
+  page: Page,
+  opts: { taskId: string; title: string; destination: string },
+): Promise<void> {
+  await page.goto(`/task/${opts.taskId}`);
+  await expect(page.getByRole("heading", { name: opts.title })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Delete ${opts.title}`, exact: true }),
+  ).toHaveAttribute("data-after-delete", opts.destination);
+}
+
+/**
+ * Delete a Workflow from its own page. The control is in the inspector's Properties tab — the
+ * panel opens on the Outline, which holds the Steps — and the confirm is the alertdialog's own.
+ */
+export async function deleteWorkflow(page: Page, workflowId: string, name: string): Promise<void> {
+  await page.goto(`/workflows/${workflowId}`);
+  const inspector = page.getByRole("complementary", { name: "Workflow" });
+  await inspector.getByRole("tab", { name: "Properties" }).click();
+  await inspector.getByRole("button", { name: "Delete workflow", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
+  await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
+}
+
+/**
  * Launch the Task from its own page: Backlog → Ready → Running, on the lifecycle arrows.
  *
  * `Move to Running` *is* the launch — `task.move` routes the transition into `running` through
@@ -199,12 +253,12 @@ export async function awaitWorkflowGate(page: Page): Promise<void> {
 }
 
 /**
- * The page's own views (Board · Brief · Changes). The page opens on the board in every state, so
+ * The page's own views (Steps · Brief · Changes). The page opens on the board in every state, so
  * a spec that wants the brief or the change has to say so — exactly as a person would.
  */
 export async function openWorkspaceTab(
   page: Page,
-  name: "Board" | "Brief" | "Changes",
+  name: "Steps" | "Brief" | "Changes",
 ): Promise<void> {
   const tab = page.getByRole("tablist", { name: "Task" }).getByRole("tab", { name, exact: true });
   await tab.click();
@@ -282,6 +336,6 @@ export function stepHeader(page: Page, name: string): Locator {
 /** Scope the board to one Step, the way the page offers it: its header, then its dialog's button. */
 export async function showStepOnBoard(page: Page, name: string): Promise<void> {
   await stepHeader(page, name).click();
-  await page.getByRole("button", { name: "Show this step on the board" }).click();
+  await page.getByRole("button", { name: "Show in Steps" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
 }

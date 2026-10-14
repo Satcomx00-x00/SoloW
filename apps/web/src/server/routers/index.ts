@@ -2,11 +2,13 @@ import "server-only";
 import { router } from "../trpc.js";
 import { flagRouter } from "./flag.js";
 import { libraryRouter } from "./harness-library.js";
+import { healthRouter } from "./health.js";
 import { historyRouter } from "./history.js";
 import { identityRouter } from "./identity.js";
 import { integrationRouter } from "./integration.js";
 import { issueRouter } from "./issue.js";
 import { mcpTokenRouter } from "./mcp-token.js";
+import { outcomesRouter } from "./outcomes.js";
 import { preferenceRouter } from "./preference.js";
 import { profileRouter } from "./profile.js";
 import { projectRouter } from "./project.js";
@@ -14,6 +16,7 @@ import { repositoryRouter } from "./repository.js";
 import { reviewRouter } from "./review.js";
 import { secretRouter } from "./secret.js";
 import { sessionRouter } from "./session.js";
+import { setupRouter } from "./setup.js";
 import { streamRouter } from "./stream.js";
 import { taskRouter } from "./task.js";
 import { workflowRouter } from "./workflow.js";
@@ -22,12 +25,14 @@ import { workspaceRouter } from "./workspace.js";
 /** The core-program API surface (Decision 0011). openapi.json is generated from this. */
 export const appRouter = router({
   flag: flagRouter,
+  health: healthRouter,
   history: historyRouter,
   identity: identityRouter,
   issue: issueRouter,
   library: libraryRouter,
   integration: integrationRouter,
   mcpToken: mcpTokenRouter,
+  outcomes: outcomesRouter,
   preference: preferenceRouter,
   task: taskRouter,
   profile: profileRouter,
@@ -36,6 +41,7 @@ export const appRouter = router({
   review: reviewRouter,
   secret: secretRouter,
   session: sessionRouter,
+  setup: setupRouter,
   stream: streamRouter,
   workflow: workflowRouter,
   workspace: workspaceRouter,

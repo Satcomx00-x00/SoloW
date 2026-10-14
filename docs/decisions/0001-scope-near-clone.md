@@ -1,6 +1,6 @@
 # 0001 — Build a near-clone rather than a narrower product
 
-**Status:** Accepted · **Date:** 2026-08-17 · **Deciders:** Product
+**Status:** Superseded by [0031](./0031-focus-on-the-solo-power-user.md) for the 1.0 scope · **Date:** 2026-08-17 · **Deciders:** Product
 
 ## Context
 
@@ -34,3 +34,14 @@ than by narrowing scope.
   ([0005](./0005-subscription-authentication.md)), durable orchestration
   ([0004](./0004-durable-orchestration-engine.md)), and one-product local-and-hosted
   ([0002](./0002-technology-stack.md), [0008](./0008-data-store-strategy.md)).
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: superseded for 1.0, as recorded.** [0031](./0031-focus-on-the-solo-power-user.md)
+replaced breadth parity with one persona on 2026-10-08. What breadth bought is now measured row
+by row in the [Feature Comparison](../product/06-feature-comparison.md) (77 of 101 rows built or
+partial). What it cost is the finding behind 0031: the core loop was not yet safe or used. This
+record stays as the reason the breadth exists and still applies to planning after 1.0.

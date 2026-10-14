@@ -4,7 +4,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { orchestratorEnv } from "../env.js";
 import type { HarnessRegistry } from "../harness/registry.js";
 import { RECLAIM_STALE_MS, STRANDED_PARK_REASON } from "../reconcile.js";
-import { CONTAINER_OWNER_PATH, deploymentId, ORCHESTRATOR_EPOCH } from "./docker.js";
+import {
+  CONTAINER_OWNER_PATH,
+  type ContainerRole,
+  deploymentId,
+  isOpenTerminal,
+  ORCHESTRATOR_EPOCH,
+} from "./docker.js";
 import type { Executor } from "./types.js";
 
 /**
@@ -47,6 +53,18 @@ import type { Executor } from "./types.js";
  * its constant would be a cycle — and the value is the one thing about it that is not derived.
  */
 export const REAP_GRACE_MS = 20_000;
+
+/**
+ * How long a one-shot container (`ContainerRole`) may live however it is claimed.
+ *
+ * A one-shot is an HTTP request's — an Explain or the setup's test — and the request removes it
+ * in its own `finally`. What this bounds is the case that `finally` cannot cover in a process that
+ * stays up: a `docker rm -f` that failed because the daemon blipped at that moment. The claim
+ * would protect such a container for the life of the process, so age has to be the second rule.
+ * An hour is an order of magnitude past anything a request does once its container exists — the
+ * prepare script, the userland probe and a two-minute turn — so no live request is ever its victim.
+ */
+export const ONE_SHOT_MAX_AGE_MS = 60 * 60_000;
 
 /**
  * The Task states a run can still be sitting inside.
@@ -132,7 +150,9 @@ export async function reapOrphanedContainers(
   if (listed.exitCode !== 0) return 0;
 
   const at = now().getTime();
-  let removed = 0;
+  let removed =
+    (await reapAbandonedOneShots(host, env.SOLOW_DOCKER_BIN, deployment, at)) +
+    (await reapAbandonedTerminals(host, env.SOLOW_DOCKER_BIN, deployment, at));
 
   for (const container of parseContainers(listed.stdout)) {
     // 1. Grace. A container younger than this may belong to a run that has not registered yet,
@@ -219,6 +239,99 @@ export async function reapOrphanedContainers(
 }
 
 /**
+ * The one-shot containers (`ContainerRole`) nothing is coming back for.
+ *
+ * A one-shot has no Task row, registry entry or Session to be evidence of life — it belongs to an
+ * HTTP request, and a request has no record anywhere but the process serving it. So the claim
+ * (`ORCHESTRATOR_EPOCH`, written by `ensureContainer` on creation) is the whole of the evidence:
+ * a container this process claimed is a request still in flight, and one it did not was left by
+ * a predecessor that died mid-request, which nobody will ever dispose of. The grace covers the
+ * moments between `docker run` and the claim; `ONE_SHOT_MAX_AGE_MS` covers a removal this process
+ * itself failed to make.
+ *
+ * Its own enumeration, and the session pass's is filtered to `solow.role=session`: the rules
+ * there read the Task table, and a one-shot labelled with the Task it explains would otherwise be
+ * judged as that Task's container — removed as "a previous run's" while the Explain was answering.
+ * A terminal carries its Task's label for the same reason and is kept out of that pass the same way.
+ */
+function reapAbandonedOneShots(
+  host: Executor,
+  bin: string,
+  deployment: string,
+  at: number,
+): Promise<number> {
+  return reapByRole(
+    host,
+    bin,
+    deployment,
+    at,
+    "oneshot",
+    async (name, createdAt) =>
+      at - createdAt > ONE_SHOT_MAX_AGE_MS || !(await claimedByThisOrchestrator(host, bin, name)),
+  );
+}
+
+/**
+ * The terminal containers (`ContainerRole`) no open window holds.
+ *
+ * Judged by whether this process still holds a socket for it (`isOpenTerminal`), and by nothing
+ * else. Not by age, the one-shot's second rule: a terminal is legitimately open for a whole
+ * afternoon, and a ceiling short enough to catch a leak would close a window someone is typing
+ * in. Not by the claim either, which says this process *made* the container and cannot say it
+ * still wants it — a `dispose()` whose `docker rm` failed leaves a container claimed by a live
+ * process that has already let it go. A predecessor's terminals are in no live process's set,
+ * and go on the first sweep after the grace.
+ */
+function reapAbandonedTerminals(
+  host: Executor,
+  bin: string,
+  deployment: string,
+  at: number,
+): Promise<number> {
+  return reapByRole(host, bin, deployment, at, "terminal", async (name) => !isOpenTerminal(name));
+}
+
+/**
+ * Remove this deployment's containers of one request-scoped role that `abandoned` says nothing
+ * holds — one enumeration, the creation grace, and the rule that is the role's own.
+ */
+async function reapByRole(
+  host: Executor,
+  bin: string,
+  deployment: string,
+  at: number,
+  role: Exclude<ContainerRole, "session">,
+  abandoned: (name: string, createdAt: number) => Promise<boolean>,
+): Promise<number> {
+  const listed = await host.exec([
+    bin,
+    "ps",
+    "-a",
+    "--filter",
+    "label=solow.managed=true",
+    "--filter",
+    `label=solow.role=${role}`,
+    "--filter",
+    `label=solow.deployment=${deployment}`,
+    "--format",
+    "{{.Names}}\t{{.CreatedAt}}",
+  ]);
+  if (listed.exitCode !== 0) return 0;
+  let removed = 0;
+  for (const line of listed.stdout.split("\n")) {
+    const [rawName, created] = line.split("\t");
+    const name = rawName?.trim();
+    if (!name) continue;
+    const createdAt = parseDockerTime(created ?? "");
+    if (createdAt === null || at - createdAt < REAP_GRACE_MS) continue;
+    if (!(await abandoned(name, createdAt))) continue;
+    const result = await host.exec([bin, "rm", "-f", name]);
+    if (result.exitCode === 0) removed += 1;
+  }
+  return removed;
+}
+
+/**
  * Whether the Task row still describes a run that could be holding this container.
  *
  * The state is half the row, and reading only that half is what leaked a container for the life
@@ -236,9 +349,9 @@ export async function reapOrphanedContainers(
  * for a `parked` Task, carrying this process's epoch and the newest Session's id, survived a sweep
  * that returned 0 and was removed by the next one after `reportStrandedParks` had spoken.
  *
- * **A `parked` row is never moved by its own run**, so pairing the state with the reason is not
- * cover on its own. A woken run does its next round with the row still reading `parked`
- * throughout, and nothing in the orchestrator used to clear `failureReason` for a parked Task —
+ * **A `parked` row is not moved by its own run until it gets a slot**, so pairing the state with
+ * the reason is not cover on its own. A woken run reads `parked` for as long as its Profile is
+ * full (a row that left `parked` while it slept makes it stand down), and nothing in the orchestrator used to clear `failureReason` for a parked Task —
  * so an overtaken stamp stayed readable here across every gap between durable steps, for as long
  * as it took an operator to move the card.
  *
@@ -280,8 +393,8 @@ function heldByRun(row: { state: TaskState; failureReason: string | null }): boo
  * `ensureContainer` writes this process's epoch into the container's own tmpfs every time it
  * creates or adopts one, so the answer is no for a container the previous, crashed process left
  * behind — the one case neither the Task table nor `heldByRun` can describe, because a run
- * suspended at the review gate has no process and no registry entry even while it is perfectly
- * alive.
+ * asleep in a park, or between two durable steps, has no process and no registry entry even
+ * while it is perfectly alive.
  *
  * Any failure is a no: the exec fails when the container has stopped, when the file was never
  * written, and when the daemon has gone — none of which is a live run holding a workspace, and

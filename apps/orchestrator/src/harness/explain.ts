@@ -1,5 +1,6 @@
 import { type ChildProcessHandle, startClaudeSession } from "@solow/claude-code";
 import { harnessProtocolDescriptor } from "@solow/contracts";
+import { detectFailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 
 /**
@@ -48,7 +49,8 @@ function failed(reason: string): HarnessExplainResult {
 
 function reasonFor(cause: unknown, command: string): string {
   const message = cause instanceof Error ? cause.message : String(cause);
-  if (/ENOENT|not found|No such file/i.test(message)) {
+  // The container driver's own refusal already names the image; see `reasonFor` in `probe.ts`.
+  if (/ENOENT|not found|No such file/i.test(message) && !/in the executor image/.test(message)) {
     return `"${command}" could not be started — is it installed and on PATH for the orchestrator?`;
   }
   return message;
@@ -119,7 +121,18 @@ export async function explainWithHarness(
     // streamed nothing and only summarised at the end.
     const turn: { ok: boolean; subtype: string | null; text: string | null } = result ?? outcome;
     const text = (streamed.trim() || turn.text || "").trim();
-    if (!turn.ok) return failed(turn.subtype ?? "the harness did not finish its answer");
+    if (!turn.ok) {
+      /*
+       * What the CLI said, ahead of the subtype. A rejected credential ends the turn with
+       * `is_error` and subtype "success", and the only account of it is the text ("Invalid API
+       * key · …", "Failed to authenticate. API Error: 401 …" — both observed against the real
+       * CLI), so a reason built from the subtype read "success" for a turn that failed.
+       */
+      const said = text || turn.text || turn.subtype || "the harness did not finish its answer";
+      return detectFailureSignal(said).credentialInvalid
+        ? { ok: false, text: null, model: null, reason: said, failure: "credential" }
+        : failed(said);
+    }
     if (!text) return failed("the harness gave no answer");
     return { ok: true, text, model, reason: null, failure: null };
   } catch (cause) {

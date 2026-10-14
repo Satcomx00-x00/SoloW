@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import { SectionStatus, SettingsField, SettingsSection } from "./settings-shell";
 
@@ -172,7 +173,7 @@ export function DangerZoneSection() {
             </form>
             {reset.error && (
               <p className="mt-3 text-destructive text-sm" role="alert">
-                {reset.error.message}
+                {describeError(reset.error)}
               </p>
             )}
           </DialogBody>

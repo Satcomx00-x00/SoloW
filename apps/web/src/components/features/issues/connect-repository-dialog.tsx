@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -118,7 +119,7 @@ export function ConnectRepositoryDialog({
           </div>
           {connect.error && (
             <p className="text-destructive text-sm" role="alert">
-              {connect.error.message}
+              {describeError(connect.error)}
             </p>
           )}
           <DialogFooter>

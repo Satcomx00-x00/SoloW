@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { describeError } from "@/lib/errors";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, ISSUE_STATUSES } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -142,8 +143,8 @@ export function IssueStatusControl({ issue }: { issue: IssueDto }) {
       )}
 
       {setStatus.error && !blockedClose && (
-        <p className="font-mono text-2xs text-state-failed" role="alert">
-          {setStatus.error.message}
+        <p className="text-2xs text-state-failed" role="alert">
+          {describeError(setStatus.error)}
         </p>
       )}
     </div>

@@ -1,7 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type { ExecutorConfig } from "@solow/contracts";
-import { orchestratorEnv } from "../env.js";
+import { type OrchestratorEnv, orchestratorEnv } from "../env.js";
 import {
   type CommandProbes,
+  type ContainerRole,
   createDockerExecutor,
   type DockerIds,
   defaultContainerUser,
@@ -69,6 +74,8 @@ export interface ExecutorFactoryOpts {
    * injectable so the driver can be tested against a fake that only records argv.
    */
   host?: Executor;
+  /** A Task's own container unless stated — see `ContainerRole` and `openOutOfBandExecutor`. */
+  role?: ContainerRole;
 }
 
 export function createExecutorFor(
@@ -155,12 +162,42 @@ export function dockerHost(opts: Pick<ExecutorFactoryOpts, "host">): Executor {
  * a test with no environment at all, and `env.ts` stays the one module that reads `process.env`
  * for configuration.
  */
+/**
+ * The control plane's own directories, which no container may be handed (B5).
+ *
+ * Directories, not the database file: every launcher keeps the keys beside it — `secret.key` or
+ * `dev-secret.key` (which decrypts every stored Secret), `orchestrator.secret`, `stream.secret`,
+ * `auth.secret` and the engine's `inngest-*.key` — and a guard that named only the database
+ * left a source that holds all of them mountable. And whatever the database driver: a Postgres
+ * deployment has no database file, but its keys are still files on this disk. Named by where
+ * they are rather than listed by file name, so a key a later launcher adds is covered too.
+ *
+ * Three places, because three launchers decide it: the database's own directory (the CLI puts
+ * it in its data directory, the dev scripts in the checkout's `.solow`), `.solow` under the
+ * working directory the launcher scripts run from, and the CLI's data directory (`SOLOW_HOME`,
+ * default `~/.solow`) for a deployment whose database is not in it. The worktree and cache
+ * roots the CLI keeps inside its data directory stay mountable — `guardMountSource` exempts the
+ * deployment's own roots nested in a protected directory.
+ */
+export function orchestratorStatePaths(
+  env: Pick<OrchestratorEnv, "SOLOW_DB_DRIVER" | "SOLOW_SQLITE_PATH" | "SOLOW_HOME">,
+  home: string = homedir(),
+): string[] {
+  const dirs = [
+    dirname(resolve(env.SOLOW_SQLITE_PATH)),
+    resolve(".solow"),
+    resolve(env.SOLOW_HOME ?? join(home, ".solow")),
+  ];
+  return [...new Set(dirs)];
+}
+
 export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
   const env = orchestratorEnv();
   return {
     jailRoot: opts.jailRoot,
     worktreeRoot: opts.worktreeRoot,
     repoCacheRoot: opts.repoCacheRoot,
+    protectedPaths: orchestratorStatePaths(env),
     bindPaths: opts.bindPaths ?? [],
     ...(opts.transcriptStore ? { transcriptStore: opts.transcriptStore } : {}),
     ...(opts.checkpointStore ? { checkpointStore: opts.checkpointStore } : {}),
@@ -169,5 +206,184 @@ export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
     pullTimeoutMs: env.SOLOW_DOCKER_PULL_TIMEOUT_MS,
     ...(opts.harnessCommands ? { harnessCommands: opts.harnessCommands } : {}),
     ...(opts.probedCommands ? { probedCommands: opts.probedCommands } : {}),
+    ...(opts.role ? { role: opts.role } : {}),
+  };
+}
+
+/** A launch that is not a Task's run, and how to end it — see `openOutOfBandExecutor`. */
+export interface OutOfBandExecutor {
+  executor: Executor;
+  /** The scratch directory: the harness's working directory, and a container's only bind mount. */
+  cwd: string;
+  /**
+   * The run's own preflight against this executor — `ok` without asking anything for a local one.
+   * Like the run's, a thrown error is a flake (a pull that timed out) and `ok: false` a verdict;
+   * the caller turns both into an answer.
+   */
+  preflight(): Promise<PreflightResult>;
+  /** Removes the container, if one was made, and the scratch directory. Never rejects. */
+  dispose(): Promise<void>;
+}
+
+export interface OutOfBandOpts {
+  workspaceId: string;
+  /** The Task an Explain is about: a label on the container, nothing more. Null for a probe. */
+  taskId: string | null;
+  /** Which route is asking; names the scratch directory so a leftover says what made it. */
+  purpose: "explain" | "probe";
+  /** What will be spawned, probed by the preflight exactly as a run's harness commands are. */
+  harnessCommands: readonly string[];
+  /** `SOLOW_WORKTREE_ROOT` and `SOLOW_REPO_CACHE_ROOT`, as a run is handed them (unresolved). */
+  worktreeRoot: string;
+  repoCacheRoot: string;
+  /** See `ExecutorFactoryOpts.host`. */
+  host?: Executor;
+}
+
+/**
+ * Somewhere to launch a harness that is not a Task's run: the Brief tab's Explain, the guided
+ * setup's test (roadmap B4).
+ *
+ * Both used to start the harness on the orchestrator's host whatever the Executor Profile said,
+ * so a Workspace whose Tasks ran in a container was explained to — and, worse, *tested* — by a
+ * harness on a machine its Tasks never touch: the setup could pass on a host-installed Claude
+ * while the image had none, or fail on a host without one while the container was fine. This
+ * builds the executor the run would build, through the same `createExecutorFor` and
+ * `probeExecutorFor`, so the image, the limits, the prepare script, the utilities and the harness
+ * binary are the run's, and so is every refusal.
+ *
+ * What it does *not* share with the run is the container. A one-shot (`ContainerRole`) is named
+ * for this request, mounts only the request's own scratch directory — no worktree, no repository,
+ * no transcript store; the profile's own mounts stay, since they are part of the environment the
+ * operator configured for every container of it — and is removed by `dispose()`, which the caller
+ * puts in a `finally`. A running Task's container is never adopted, disturbed or removed by it.
+ *
+ * The scratch directory is under `SOLOW_WORKTREE_ROOT` for a container, not the system temp
+ * directory: it has to pass the mount guard, and the deployment's own root is the one place that
+ * always does — a macOS `$TMPDIR` (`/var/folders/…`) never would. A local launch keeps the temp
+ * directory it always had, since nothing is mounted.
+ *
+ * A null profile is the host: Settings' "Test" asks about a Harness Profile with no executor in
+ * view, and keeps the probe it always had.
+ */
+export async function openOutOfBandExecutor(
+  profile: { config: ExecutorConfig } | null,
+  opts: OutOfBandOpts,
+): Promise<OutOfBandExecutor> {
+  const config = profile?.config ?? { kind: "local" as const };
+  if (config.kind !== "docker") {
+    // Refused before any directory is made, in the factory's own words; the lifecycle's
+    // `hasDriver` gate has the same sentence for a run.
+    if (config.kind !== "local") throw new Error(missingDriverReason(config.kind));
+    const cwd = await mkdtemp(join(tmpdir(), `solow-${opts.purpose}-`));
+    return {
+      executor: createLocalExecutor(cwd),
+      cwd,
+      preflight: async () => ({ ok: true, harnessCommands: [] }),
+      dispose: () => rm(cwd, { recursive: true, force: true }).catch(() => {}),
+    };
+  }
+
+  // Made if absent: the setup's test is routinely the first thing to run on a fresh install,
+  // before any Task has created the root.
+  await mkdir(opts.worktreeRoot, { recursive: true });
+  const cwd = await mkdtemp(join(opts.worktreeRoot, `.solow-${opts.purpose}-`));
+  const factoryOpts: ExecutorFactoryOpts = {
+    // A request id where a run puts its Session's: the one-shot's name and `solow.run` label.
+    ids: { workspaceId: opts.workspaceId, taskId: opts.taskId ?? "", sessionId: randomUUID() },
+    jailRoot: cwd,
+    worktreeRoot: opts.worktreeRoot,
+    repoCacheRoot: opts.repoCacheRoot,
+    harnessCommands: opts.harnessCommands,
+    // One map for both, as `probeExecutorFor` requires.
+    probedCommands: new Map(),
+    role: "oneshot",
+    ...(opts.host ? { host: opts.host } : {}),
+  };
+  const executor = createExecutorFor({ config }, factoryOpts);
+  return {
+    executor,
+    cwd,
+    preflight: () => probeExecutorFor({ config }, factoryOpts),
+    async dispose() {
+      // The container first: it holds the scratch directory as a bind mount, and a harness still
+      // writing into it would race the removal below.
+      await executor.dispose();
+      await rm(cwd, { recursive: true, force: true }).catch(() => {});
+    },
+  };
+}
+
+/** Where the Task page's terminal runs, and how to end it — see `openTerminalExecutor`. */
+export type TerminalExecutor = Omit<OutOfBandExecutor, "cwd">;
+
+export interface TerminalExecutorOpts {
+  workspaceId: string;
+  taskId: string;
+  /** The worktree the terminal opens in — the local driver's root, as it has always been. */
+  cwd: string;
+  /** Where the Task's run works, from the function the run itself uses (`taskExecutorPlacement`). */
+  placement: Pick<
+    ExecutorFactoryOpts,
+    | "jailRoot"
+    | "worktreeRoot"
+    | "repoCacheRoot"
+    | "bindPaths"
+    | "transcriptStore"
+    | "checkpointStore"
+  >;
+  /** The Task's harness, probed so the terminal knows whether its conversation can be mounted. */
+  harnessCommands: readonly string[];
+  /** See `ExecutorFactoryOpts.host`. */
+  host?: Executor;
+}
+
+/**
+ * Somewhere to open the Task page's terminal: where the Task runs (roadmap B4).
+ *
+ * It used to be the orchestrator's host whatever the Executor Profile said. A Docker Task's
+ * worktree is bind-mounted at its own path, so the host had a directory to open a shell in — and
+ * the terminal mounts the Task's conversation, so for a Task that asked for a container it ran
+ * `claude --resume` on the host, holding the Task's credential, with nothing between it and the
+ * machine. That is the isolation the profile exists to buy, given away by a window.
+ *
+ * A Docker Task gets a container of its own (`ContainerRole` "terminal"): the run's image, limits
+ * and user, the run's mounts through `taskExecutorPlacement`, the run's preflight — and never the
+ * run's container, which either side's `dispose()` would otherwise remove from under the other.
+ * There is no fallback to the host on any failure; the caller reports the reason instead.
+ *
+ * Synchronous, like `createExecutorFor`: nothing is made until `preflight()`, and the caller owns
+ * `dispose()` from the moment this returns, because constructing a terminal executor is what
+ * marks its container as held (`isOpenTerminal`).
+ */
+export function openTerminalExecutor(
+  profile: { config: ExecutorConfig },
+  opts: TerminalExecutorOpts,
+): TerminalExecutor {
+  const config = profile.config;
+  if (config.kind !== "docker") {
+    if (config.kind !== "local") throw new Error(missingDriverReason(config.kind));
+    return {
+      executor: createLocalExecutor(opts.cwd),
+      preflight: async () => ({ ok: true, harnessCommands: [] }),
+      dispose: async () => {},
+    };
+  }
+  const factoryOpts: ExecutorFactoryOpts = {
+    // A connection id where a run puts its Session's: the container's name and `solow.run` label,
+    // so two windows on one Task are two containers that never adopt each other.
+    ids: { workspaceId: opts.workspaceId, taskId: opts.taskId, sessionId: randomUUID() },
+    ...opts.placement,
+    harnessCommands: opts.harnessCommands,
+    // One map for both, as `probeExecutorFor` requires.
+    probedCommands: new Map(),
+    role: "terminal",
+    ...(opts.host ? { host: opts.host } : {}),
+  };
+  const executor = createExecutorFor({ config }, factoryOpts);
+  return {
+    executor,
+    preflight: () => probeExecutorFor({ config }, factoryOpts),
+    dispose: () => executor.dispose(),
   };
 }

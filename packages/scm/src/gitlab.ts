@@ -9,6 +9,7 @@ import {
 } from "./http.js";
 import {
   type ChangeProvider,
+  type ChangeRequestInput,
   type EpicSeed,
   type ExternalBranch,
   type ExternalChangeRequest,
@@ -816,6 +817,45 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability, Issue
       baseRef: r.target_branch,
       authorLogin: r.author?.username ?? null,
     }));
+  }
+
+  async upsertChangeRequest(
+    credential: ScmCredential,
+    repo: RepoRef,
+    input: ChangeRequestInput,
+  ): Promise<{ changeRequest: ExternalChangeRequest; created: boolean }> {
+    const root = `${apiRoot(credential.baseUrl)}/projects/${projectPath(repo)}/merge_requests`;
+    const headers = authHeaders(credential);
+    const toExternal = (r: GitlabMergeRequest): ExternalChangeRequest => ({
+      externalId: String(r.iid),
+      number: r.iid,
+      title: r.title,
+      state: mapState(r.state),
+      url: r.web_url,
+      headRef: r.source_branch,
+      baseRef: r.target_branch,
+      authorLogin: r.author?.username ?? null,
+    });
+    const open = (await scmFetch(
+      "gitlab",
+      `${root}?state=opened&source_branch=${encodeURIComponent(input.head)}&per_page=1`,
+      headers,
+    )) as GitlabMergeRequest[];
+    const existing = open[0];
+    // Already open: the push that preceded this is the update. Its title and description are
+    // left as they are, because by now they may be a reviewer's words rather than ours.
+    if (existing) return { changeRequest: toExternal(existing), created: false };
+    const base = input.base ?? (await this.getRepository(credential, repo))?.defaultBranch;
+    if (!base) {
+      throw new ScmProviderError("gitlab", `could not tell which branch ${repo} merges into`);
+    }
+    const made = (await scmSend("gitlab", root, headers, "POST", {
+      title: input.title,
+      description: input.body,
+      source_branch: input.head,
+      target_branch: base,
+    })) as GitlabMergeRequest;
+    return { changeRequest: toExternal(made), created: true };
   }
 
   /** GitLab returns `color` already prefixed with "#" — passed through as-is, unlike GitHub's. */

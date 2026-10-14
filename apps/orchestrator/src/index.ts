@@ -1,9 +1,12 @@
 /// <reference types="bun-types" />
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   announceRequest,
+  dockerAvailabilityRequest,
+  type ExecutorConfig,
+  type ExecutorKind,
+  executorImageBuildRequest,
+  type HarnessProbeFailure,
   harnessExplainRequest,
   harnessProbeRequest,
   taskInputSchema,
@@ -12,11 +15,21 @@ import { type StreamTicketClaims, streamChannel, verifyStreamTicket } from "@sol
 import { createDb, type Db } from "@solow/db";
 import { prepareHarnessEnv } from "./billing/guard.js";
 import {
+  loadExecutorProfile,
   loadHarnessProbeContext,
   loadTaskRunContext,
   updateHarnessCatalogCapabilities,
 } from "./data.js";
 import { orchestratorEnv } from "./env.js";
+import { probeDockerAvailability } from "./executor/availability.js";
+import { hasDriver, missingDriverReason } from "./executor/drivers.js";
+import {
+  type OutOfBandExecutor,
+  type OutOfBandOpts,
+  openOutOfBandExecutor,
+  openTerminalExecutor,
+} from "./executor/factory.js";
+import { createExecutorImageBuilder, type ExecutorImageBuilder } from "./executor/image-build.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
@@ -24,13 +37,14 @@ import { clientDirectives } from "./harness/client-directives.js";
 import { explainWithHarness } from "./harness/explain.js";
 import { profileHarnessConfig } from "./harness/harness-config.js";
 import { resolveHarnessConfigEnv } from "./harness/hermetic-home.js";
-import { probeHarness } from "./harness/probe.js";
+import { answerProbeTurn, probeHarness } from "./harness/probe.js";
 import {
   type HarnessRegistry,
   harnessRegistry,
   type PermissionAnswerResult,
   type WidgetAnswerResult,
 } from "./harness/registry.js";
+import { cachedProbe, engineHealthUrl, handleHealthGet, probeEngine } from "./health.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
@@ -42,8 +56,8 @@ import { attachSubscriber } from "./ws/replay.js";
 import {
   authorizeTerminal,
   closeTerminal,
-  openTerminal,
-  resolveTerminalLaunch,
+  startTerminal,
+  type TerminalDeps,
   type TerminalWsData,
   terminalMessage,
 } from "./ws/terminal.js";
@@ -78,17 +92,53 @@ export interface WsServerDeps {
    * without a daemon.
    */
   dockerHost: Executor;
+  /**
+   * Where `/explain` and `/probe-agent` launch their harness (`openOutOfBandExecutor`), with the
+   * deployment's roots and `dockerHost` already applied.
+   *
+   * Injectable for the reason `dockerHost` is, and one more: the tests drive a Docker-profiled
+   * launch against a fake host that records argv, and the roots a container launch needs are
+   * read from an environment that is parsed once per process and cached.
+   */
+  outOfBand: (
+    profile: { config: ExecutorConfig } | null,
+    opts: OutOfBandLaunch,
+  ) => Promise<OutOfBandExecutor>;
+  /** The guided setup's build of the executor image — one per process (`executor/image-build.ts`). */
+  imageBuild: ExecutorImageBuilder;
+  /**
+   * Where the Task page's terminal runs (`openTerminalExecutor`), with `dockerHost` applied —
+   * injectable for the reason `outOfBand` is.
+   */
+  terminalExecutor: TerminalDeps["terminalExecutor"];
 }
 
+/** What a route says about its own launch; the deployment fills in the rest (`outOfBand`). */
+export type OutOfBandLaunch = Pick<
+  OutOfBandOpts,
+  "workspaceId" | "taskId" | "purpose" | "harnessCommands"
+>;
+
 function defaultWsDeps(): WsServerDeps {
+  // `process.cwd()` as its root because the reaper uses only `exec`, and every command it
+  // issues names what it acts on. The container driver builds its host the same way.
+  const dockerHost = createLocalExecutor(process.cwd());
   return {
     db: createDb(),
     now: () => Date.now(),
     streamSecret: orchestratorEnv().SOLOW_STREAM_SECRET,
     registry: harnessRegistry,
-    // `process.cwd()` as its root because the reaper uses only `exec`, and every command it
-    // issues names what it acts on. In idiom with `handleProbePost` below.
-    dockerHost: createLocalExecutor(process.cwd()),
+    dockerHost,
+    outOfBand: (profile, opts) =>
+      openOutOfBandExecutor(profile, {
+        ...opts,
+        worktreeRoot: orchestratorEnv().SOLOW_WORKTREE_ROOT,
+        repoCacheRoot: orchestratorEnv().SOLOW_REPO_CACHE_ROOT,
+        host: dockerHost,
+      }),
+    imageBuild: createExecutorImageBuilder({ host: dockerHost }),
+    terminalExecutor: (profile, opts) =>
+      openTerminalExecutor(profile, { ...opts, host: dockerHost }),
   };
 }
 
@@ -172,30 +222,72 @@ export async function handleAnnouncePost(
  */
 const OUT_OF_BAND_HOME = ".solow-harness-home";
 
+/** A thrown cause as one line an operator can read — the preflight's flakes, a scratch directory. */
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /**
- * `POST /probe-agent` — start the harness a Harness Profile names, ask it what it is, and stop it.
+ * Open the executor an out-of-band launch runs in and run the run's own preflight on it.
  *
- * Why this lives here rather than in the web API: the API is forbidden to reach the execution
- * host at all (`scripts/audit-executor-boundary.ts`), and a probe is by definition a spawn. Why
- * it is authenticated by a signed ticket rather than left open like `/events`: it starts a binary
- * an Owner chose, with that Owner's credential in its environment, so an unauthenticated route
- * here would be a remote command execution with a stolen wallet attached.
- *
- * The Workspace comes from the ticket's claims, never the body. A *board-scoped* ticket (no
- * `taskId`) is exactly right and is what the API mints: a probe belongs to Settings, before any
- * Task exists to scope it to.
+ * One place for the three ways that can fail before a harness exists — no driver for the kind, a
+ * scratch directory or container that could not be made, a preflight verdict or flake — each
+ * answered as a reason rather than a 500, because both routes exist to put the reason on the
+ * screen of the person who can act on it. The executor comes back only when it is ready, and the
+ * caller owns its `dispose()` from then on; on every refusal here it has already been disposed.
  */
+async function openReadyOutOfBand(
+  deps: Pick<WsServerDeps, "outOfBand">,
+  profile: { config: ExecutorConfig } | null,
+  opts: OutOfBandLaunch,
+): Promise<{ ok: true; launch: OutOfBandExecutor } | { ok: false; reason: string }> {
+  const kind = profile?.config.kind ?? "local";
+  if (!hasDriver(kind)) return { ok: false, reason: missingDriverReason(kind) };
+  let launch: OutOfBandExecutor;
+  try {
+    launch = await deps.outOfBand(profile, opts);
+  } catch (cause) {
+    return { ok: false, reason: messageOf(cause) };
+  }
+  const ready = await launch.preflight().catch(
+    // A flake to a run, which Inngest retries; a request has no retry, so it is the answer.
+    (cause: unknown) => ({ ok: false as const, reason: messageOf(cause) }),
+  );
+  if (ready.ok) return { ok: true, launch };
+  await launch.dispose();
+  return { ok: false, reason: ready.reason };
+}
+
+/**
+ * The harness home and configuration variables for an out-of-band launch, decided the way a
+ * run's round decides them (`round.ts`): by the executor's kind, against the executor's own base.
+ *
+ * A container already has a `HOME` nobody has configured — its tmpfs, `CONTAINER_HOME` — and is
+ * only told to stay in it; a host launch is pointed at `OUT_OF_BAND_HOME` in the scratch
+ * directory. Handing a container the host path would name a directory that does not exist inside
+ * it, which is the case `needsAppOwnedHome` exists to refuse.
+ */
+function outOfBandConfigEnv(
+  kind: ExecutorKind,
+  launch: OutOfBandExecutor,
+  baseEnv: Record<string, string>,
+): Promise<Record<string, string>> {
+  return resolveHarnessConfigEnv({ kind, home: join(launch.cwd, OUT_OF_BAND_HOME), baseEnv });
+}
+
 /**
  * `POST /explain` — "ask this Task's own harness to explain something" (the Brief tab's
  * Explain). In idiom with `handleProbePost` below: the same ticket, the same env shaping from
  * the Profile's Secret, the same throwaway working directory — and the Task's harness, model
- * and executor environment, because the answer has to come from the harness the operator is
- * already paying for, under the credential its Profile points at. One print turn, no tools, no
- * worktree; the text comes back and nothing is recorded.
+ * and Executor Profile, because the answer has to come from the harness the operator is already
+ * paying for, under the credential its Profile points at, *where the Task runs*. For a Docker
+ * profile that is a one-shot container of the Task's image (`openOutOfBandExecutor`), never the
+ * Task's own container, which may be mid-turn. One print turn, no tools, no worktree; the text
+ * comes back and nothing is recorded.
  */
 export async function handleExplainPost(
   req: Request,
-  deps: Pick<WsServerDeps, "db" | "now" | "streamSecret">,
+  deps: Pick<WsServerDeps, "db" | "now" | "streamSecret" | "outOfBand">,
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -216,22 +308,31 @@ export async function handleExplainPost(
   } catch {
     return new Response("task_not_found", { status: 404 });
   }
+  const failed = (reason: string, failure: "credential" | "harness" = "harness") =>
+    Response.json({ ok: false, text: null, model: null, reason, failure });
+
   /*
    * Out of band, but not out of scope: this launches the very same harness a Task does, and a
    * "why did you do that" answered against the operator's own `~/.claude` would be an answer
-   * about a configuration no run of theirs ever uses (Decision 0027). A temp home rather than the
-   * Task's, because there is no Task here and nothing is meant to survive the request.
+   * about a configuration no run of theirs ever uses (Decision 0027). A scratch home rather than
+   * the Task's, because there is no Task run here and nothing is meant to survive the request.
    */
-  const cwd = await mkdtemp(join(tmpdir(), "solow-explain-"));
+  const opened = await openReadyOutOfBand(deps, ctx.executorProfile, {
+    workspaceId,
+    taskId,
+    purpose: "explain",
+    harnessCommands: [ctx.harnessCatalog.command],
+  });
+  if (!opened.ok) return failed(opened.reason);
+  const { launch } = opened;
   try {
-    const configEnv = await resolveHarnessConfigEnv({
-      kind: "local",
-      home: join(cwd, OUT_OF_BAND_HOME),
-      baseEnv: process.env,
-    });
+    // The executor's base, not `process.env`: on the host it is the one that withholds the
+    // orchestrator's own secrets (`isOrchestratorSecret`), and in a container it is the image's.
+    const hostEnv = await launch.executor.baseEnv();
+    const configEnv = await outOfBandConfigEnv(ctx.executorProfile.config.kind, launch, hostEnv);
     // The Profile's Harness Config travels as it does on a run (Decision 0028); one that cannot
     // be used is the run's problem to report, so an explanation simply goes without it.
-    const { launch } = await profileHarnessConfig(
+    const { launch: harnessLaunch } = await profileHarnessConfig(
       deps.db,
       workspaceId,
       ctx.harnessProfile,
@@ -240,29 +341,25 @@ export async function handleExplainPost(
     const shaped = prepareHarnessEnv({
       authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
-      baseEnv: process.env,
+      baseEnv: hostEnv,
       subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
       meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
       profileEnv: ctx.executorProfile.config.env ?? {},
-      configEnv: { ...configEnv, ...(launch.ok ? launch.data.env : {}) },
+      configEnv: { ...configEnv, ...(harnessLaunch.ok ? harnessLaunch.data.env : {}) },
     });
     if (!shaped.ok) {
-      return Response.json({
-        ok: false,
-        text: null,
-        model: null,
-        reason:
-          "this task's harness profile has no usable credential — check the Secret it points at",
-        failure: "credential",
-      });
+      return failed(
+        "this task's harness profile has no usable credential — check the Secret it points at",
+        "credential",
+      );
     }
-    const report = await explainWithHarness(createLocalExecutor(cwd), {
+    const report = await explainWithHarness(launch.executor, {
       command: ctx.harnessCatalog.command,
       // Without `--auto` and its kind, which `opencode acp` refuses; an explanation runs in plan
       // mode, so the approval it stands for has nothing to apply to here.
       args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
       env: shaped.data,
-      cwd,
+      cwd: launch.cwd,
       protocol: ctx.harnessCatalog.protocol,
       ...(ctx.harnessProfile.model ? { model: ctx.harnessProfile.model } : {}),
       system: parsed.data.system,
@@ -270,13 +367,81 @@ export async function handleExplainPost(
     });
     return Response.json(report);
   } finally {
-    await rm(cwd, { recursive: true, force: true });
+    await launch.dispose();
   }
 }
 
+/**
+ * `POST /executor-availability` — can this host run the container executor (roadmap B4).
+ * Ticket-authenticated like the probe, though the answer is about the machine and not the tenant:
+ * an unauthenticated caller has no business learning what the orchestrator's host runs.
+ */
+export async function handleDockerAvailabilityPost(
+  req: Request,
+  deps: Pick<WsServerDeps, "now" | "streamSecret" | "dockerHost">,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = dockerAvailabilityRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  return Response.json(await probeDockerAvailability(deps.dockerHost));
+}
+
+/**
+ * `POST /executor-image` — where the executor image's build is; `POST /executor-image/build` —
+ * start one, or answer with the one already running (roadmap B4, the guided setup's one click).
+ *
+ * Signed like `/executor-availability`, and for more reason: starting a build spends this host's
+ * disk, network and minutes. The start answers at once and the build carries on detached from it,
+ * so no request here waits on Docker.
+ */
+export async function handleExecutorImagePost(
+  req: Request,
+  deps: Pick<WsServerDeps, "now" | "streamSecret" | "imageBuild">,
+  action: "status" | "start",
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = executorImageBuildRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  return Response.json(action === "start" ? deps.imageBuild.start() : deps.imageBuild.status());
+}
+
+/**
+ * `POST /probe-agent` — start the harness a Harness Profile names, ask it what it is, and stop it.
+ *
+ * Why this lives here rather than in the web API: the API is forbidden to reach the execution
+ * host at all (`scripts/audit-executor-boundary.ts`), and a probe is by definition a spawn. Why
+ * it is authenticated by a signed ticket rather than a shared bearer secret like `/events`: it starts a binary
+ * an Owner chose, with that Owner's credential in its environment, so an unauthenticated route
+ * here would be a remote command execution with a stolen wallet attached.
+ *
+ * The Workspace comes from the ticket's claims, never the body. A *board-scoped* ticket (no
+ * `taskId`) is exactly right and is what the API mints: a probe belongs to Settings, before any
+ * Task exists to scope it to.
+ *
+ * With `turn`, a probe that passed is followed by one real prompt (`answerProbeTurn`) — the
+ * guided setup's test run, which has to prove the credential and not only the binary. With
+ * `executorProfileId` it runs where that profile's Tasks run (roadmap B4): the setup names the
+ * executor a new Task would get, so a container setup is tested in a one-shot container of its
+ * image, after the run's own preflight, and an image that cannot be used is a failed test with
+ * `failure: "executor"` rather than a pass earned by a harness on the host.
+ */
 export async function handleProbePost(
   req: Request,
-  deps: Pick<WsServerDeps, "db" | "now" | "streamSecret">,
+  deps: Pick<WsServerDeps, "db" | "now" | "streamSecret" | "outOfBand">,
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -293,13 +458,37 @@ export async function handleProbePost(
 
   const ctx = await loadHarnessProbeContext(deps.db, workspaceId, parsed.data.agentProfileId);
   if (!ctx) return new Response("agent_profile_not_found", { status: 404 });
+  // Resolved in the ticket's Workspace, like the Harness Profile above: a named executor that is
+  // not this tenant's is absent, never a stranger's image to run this tenant's credential in.
+  const named = parsed.data.executorProfileId;
+  const executor = named ? await loadExecutorProfile(deps.db, workspaceId, named) : null;
+  if (named && !executor) return new Response("executor_profile_not_found", { status: 404 });
+
+  const failed = (reason: string, failure: HarnessProbeFailure) =>
+    Response.json({
+      ok: false,
+      reason,
+      protocolVersion: null,
+      authMethods: [],
+      agent: null,
+      capabilities: { models: [], modes: [] },
+      failure,
+    });
 
   /*
    * A scratch directory, not a worktree. An ACP agent is handed a `cwd` it may read, and giving
    * it a real Repository to answer "are you installed" would put a probe's blast radius above
-   * its purpose. Removed either way — a probe must not leave anything behind.
+   * its purpose. Removed either way — a probe must not leave anything behind, and in a container
+   * that includes the container.
    */
-  const cwd = await mkdtemp(join(tmpdir(), "solow-probe-"));
+  const opened = await openReadyOutOfBand(deps, executor, {
+    workspaceId,
+    taskId: null,
+    purpose: "probe",
+    harnessCommands: [ctx.harnessCatalog.command],
+  });
+  if (!opened.ok) return failed(opened.reason, "executor");
+  const { launch } = opened;
   try {
     /*
      * The same environment a real run would get, from the same billing guard — because "works
@@ -308,53 +497,46 @@ export async function handleProbePost(
      * app-owned configuration of Decision 0027: a probe that passed only because the operator's
      * own `~/.claude` happened to be logged in would be answering for a Task that will not be.
      */
-    const configEnv = await resolveHarnessConfigEnv({
-      kind: "local",
-      home: join(cwd, OUT_OF_BAND_HOME),
-      baseEnv: process.env,
-    });
+    // The executor's base, not `process.env` — see `handleExplainPost`.
+    const hostEnv = await launch.executor.baseEnv();
+    const configEnv = await outOfBandConfigEnv(executor?.config.kind ?? "local", launch, hostEnv);
     // A Harness Config a run would refuse is a failed probe, said by name (Decision 0028).
-    const { config, launch } = await profileHarnessConfig(
+    const { config, launch: harnessLaunch } = await profileHarnessConfig(
       deps.db,
       workspaceId,
       ctx.harnessProfile,
       ctx.harnessCatalog,
     );
-    if (!launch.ok) {
-      return Response.json({
-        ok: false,
-        reason: `the harness config "${config?.name}" cannot be used: ${launch.error}`,
-        protocolVersion: null,
-        authMethods: [],
-        agent: null,
-        capabilities: { models: [], modes: [] },
-      });
+    if (!harnessLaunch.ok) {
+      return failed(
+        `the harness config "${config?.name}" cannot be used: ${harnessLaunch.error}`,
+        "harness",
+      );
     }
     const shaped = prepareHarnessEnv({
       authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
-      baseEnv: process.env,
+      baseEnv: hostEnv,
       subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
       meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
-      configEnv: { ...configEnv, ...launch.data.env },
+      // The named executor's environment, under the credential as on a run; Settings' bare
+      // probe names none and keeps the environment it always had.
+      ...(executor ? { profileEnv: executor.config.env ?? {} } : {}),
+      configEnv: { ...configEnv, ...harnessLaunch.data.env },
     });
     if (!shaped.ok) {
-      return Response.json({
-        ok: false,
-        reason: "this Profile has no usable credential — check the Secret it points at",
-        protocolVersion: null,
-        authMethods: [],
-        agent: null,
-        capabilities: { models: [], modes: [] },
-      });
+      return failed(
+        "this Profile has no usable credential — check the Secret it points at",
+        "credential",
+      );
     }
 
-    const report = await probeHarness(createLocalExecutor(cwd), {
+    const report = await probeHarness(launch.executor, {
       command: ctx.harnessCatalog.command,
       // As a run launches it: `--auto` is SoloW's to apply, not the ACP harness's to parse.
       args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
       env: shaped.data,
-      cwd,
+      cwd: launch.cwd,
       protocol: ctx.harnessCatalog.protocol,
       minVersion: ctx.harnessCatalog.minVersion,
       harnessName: ctx.harnessCatalog.displayName,
@@ -378,9 +560,19 @@ export async function handleProbePost(
         report.capabilities,
       ).catch(() => {});
     }
-    return Response.json(report);
+    if (!parsed.data.turn) return Response.json(report);
+    return Response.json(
+      await answerProbeTurn(launch.executor, report, {
+        command: ctx.harnessCatalog.command,
+        args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
+        env: shaped.data,
+        cwd: launch.cwd,
+        protocol: ctx.harnessCatalog.protocol,
+        ...(ctx.harnessProfile.model ? { model: ctx.harnessProfile.model } : {}),
+      }),
+    );
   } finally {
-    await rm(cwd, { recursive: true, force: true });
+    await launch.dispose();
   }
 }
 
@@ -663,7 +855,7 @@ function asTerminal(ws: {
   send(data: string | Uint8Array): unknown;
   close(code?: number, reason?: string): void;
 }) {
-  return ws as Parameters<typeof openTerminal>[0];
+  return ws as Parameters<typeof startTerminal>[0];
 }
 
 /**
@@ -686,9 +878,9 @@ export function startWebSocketServer(
         worktreeRoot: resolve(orchestratorEnv().SOLOW_WORKTREE_ROOT),
       })
         .then((report) => {
-          if (report.purged > 0 || report.expired > 0) {
+          if (report.purged > 0 || report.expired > 0 || report.prunedSessions > 0) {
             console.log(
-              `[solow/orchestrator] retention: purged ${report.purged} deleted task(s), expired ${report.expired} done task(s)`,
+              `[solow/orchestrator] retention: purged ${report.purged} deleted task(s), expired ${report.expired} done task(s), removed ${report.prunedEvents} transcript event(s) from ${report.prunedSessions} session(s)`,
             );
           }
         })
@@ -697,10 +889,16 @@ export function startWebSocketServer(
     setInterval(() => void retention(), RETENTION_INTERVAL_MS);
   }, RECONCILE_GRACE_MS);
 
+  const engineProbe = cachedProbe(() => probeEngine(engineHealthUrl(orchestratorEnv())));
   return Bun.serve<WsData | TerminalWsData>({
     port,
+    hostname: orchestratorEnv().SOLOW_BIND_HOST,
     async fetch(req, server) {
       const { pathname } = new URL(req.url);
+      // Liveness, and the engine's behind it (FINDINGS F3) — see `health.ts`.
+      if (pathname === "/health" && req.method === "GET") {
+        return handleHealthGet(engineProbe);
+      }
       // The two HTTP routes the durable engine needs (Decision 0004), handled before the
       // upgrade check below so they never fall into the "websocket only" 426: `/events` is
       // where `orchestrator-client.ts`'s `emit()` lands, and `/api/inngest` is what the
@@ -708,27 +906,29 @@ export function startWebSocketServer(
       if (pathname === "/events" && req.method === "POST") return handleEventPost(req);
       if (pathname === "/api/inngest") return inngestServeHandler(req);
       if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
+      /*
+       * Bun closes a request that has not been answered in ten seconds (`idleTimeout`), and these
+       * two hold one open while a harness starts and answers — in a container, after the
+       * container itself is made and preflighted. Under that clock an Explain the harness took
+       * eleven seconds over reached the web as a dropped socket, though the route allows it two
+       * minutes. Each bounds itself (`PROBE_TIMEOUT_MS`, `EXPLAIN_TIMEOUT_MS`, the preflight's
+       * pull timeout), so the server's clock is switched off for them alone.
+       */
+      if (pathname === "/probe-agent" || pathname === "/explain") server.timeout(req, 0);
       if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
+      if (pathname === "/executor-availability" && req.method === "POST")
+        return handleDockerAvailabilityPost(req, deps);
+      if (pathname === "/executor-image" && req.method === "POST")
+        return handleExecutorImagePost(req, deps, "status");
+      if (pathname === "/executor-image/build" && req.method === "POST")
+        return handleExecutorImagePost(req, deps, "start");
       if (pathname === "/explain" && req.method === "POST") return handleExplainPost(req, deps);
       // The Task page's terminal: its own socket, its own ticket check (see `ws/terminal.ts`).
+      // Where it runs is decided once the socket is open (`startTerminal`), not here.
       if (pathname === "/terminal") {
         const terminal = await authorizeTerminal(req.url, deps);
         if (!terminal.ok) return new Response(terminal.error, { status: terminal.status });
-        const launch = await resolveTerminalLaunch(
-          {
-            db: deps.db,
-            registry: deps.registry,
-            // Raw, not resolved: a relative root is also where runs before the fix left the home
-            // inside the worktree, and the launch looks there too.
-            worktreeRoot: orchestratorEnv().SOLOW_WORKTREE_ROOT,
-          },
-          {
-            workspaceId: terminal.data.claims.workspaceId,
-            taskId: terminal.data.claims.taskId ?? "",
-            cwd: terminal.data.cwd,
-          },
-        );
-        if (server.upgrade(req, { data: { ...terminal.data, launch } })) return undefined;
+        if (server.upgrade(req, { data: terminal.data })) return undefined;
         return new Response("websocket only", { status: 426 });
       }
 
@@ -740,7 +940,15 @@ export function startWebSocketServer(
     websocket: {
       async open(ws) {
         if (isTerminal(ws.data)) {
-          openTerminal(asTerminal(ws), createLocalExecutor(ws.data.cwd));
+          await startTerminal(asTerminal(ws), {
+            db: deps.db,
+            registry: deps.registry,
+            // Raw, not resolved: a relative root is also where runs before the fix left the home
+            // inside the worktree, and the launch looks there too.
+            worktreeRoot: orchestratorEnv().SOLOW_WORKTREE_ROOT,
+            repoCacheRoot: orchestratorEnv().SOLOW_REPO_CACHE_ROOT,
+            terminalExecutor: deps.terminalExecutor,
+          });
           return;
         }
         const data = ws.data;

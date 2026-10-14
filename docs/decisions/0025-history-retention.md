@@ -1,6 +1,8 @@
 # 0025 — Closed and deleted Tasks stay resumable for seven days
 
-**Status:** Accepted · **Date:** 2026-09-11 · **Deciders:** Architecture
+**Status:** Accepted, amended by [0032](./0032-transcript-retention.md) (2026-10-08: a finished
+Task's transcript is kept for a window the Workspace chooses, not for as long as the Task exists) ·
+**Date:** 2026-09-11 · **Deciders:** Architecture
 **Builds on:** [0017](./0017-worktree-git-rpc.md), [0023](./0023-docker-executor-cli.md) ·
 **Enables:** [F02](../features/F02-kanban-task-administration.md) (history), [F11](../features/F11-sessions-conversations.md)
 

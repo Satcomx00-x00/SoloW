@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import {
   SectionStatus,
@@ -55,7 +56,10 @@ export function parseConfigText(
   try {
     json = JSON.parse(text);
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Not valid JSON." };
+    // The engine's own reason is kept: it names the line and column, which is where to look.
+    return {
+      error: `Not valid JSON — fix it before saving. ${e instanceof Error ? e.message : ""}`.trim(),
+    };
   }
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
     return { error: "The config must be a JSON object." };
@@ -185,7 +189,7 @@ function EditConfig({ config, onDone }: { config: HarnessConfigDto; onDone: () =
       <ConfigEditor harness={config.harness} id={`${ids}-json`} onChange={setText} value={text} />
       {update.error && (
         <p className="text-destructive text-sm" role="alert">
-          {update.error.message}
+          {describeError(update.error)}
         </p>
       )}
       <div className="flex justify-end gap-2">
@@ -209,7 +213,7 @@ function ImportConfigButton({ onImported }: { onImported: (name: string) => void
       utils.profile.harnessConfig.list.invalidate();
       onImported(row.name);
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(describeError(e)),
   });
 
   const read = async (file: File) => {
@@ -218,12 +222,14 @@ function ImportConfigButton({ onImported }: { onImported: (name: string) => void
     try {
       json = JSON.parse(await file.text());
     } catch {
-      setError("That file is not JSON.");
+      setError("That file is not JSON. Choose a file saved with a harness config's Export.");
       return;
     }
     const parsed = harnessConfigDocument.safeParse(json);
     if (!parsed.success) {
-      setError(parsed.error.issues.map((i) => i.message).join("; "));
+      setError(
+        `Not a harness config: ${parsed.error.issues.map((i) => i.message).join("; ")}. Choose a file saved with a harness config's Export.`,
+      );
       return;
     }
     importConfig.mutate({ document: parsed.data });
@@ -253,7 +259,7 @@ function ImportConfigButton({ onImported }: { onImported: (name: string) => void
         Import
       </Button>
       {error && (
-        <p className="basis-full font-mono text-feedback-error text-xs" role="alert">
+        <p className="basis-full text-feedback-error text-xs" role="alert">
           {error}
         </p>
       )}
@@ -297,7 +303,7 @@ export function HarnessConfigsSection() {
       const document = await utils.client.profile.harnessConfig.export.query({ id: config.id });
       saveJson(fileNameFor(config.name), pretty(document));
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : String(e));
+      setExportError(describeError(e));
     }
   };
 
@@ -425,7 +431,7 @@ export function HarnessConfigsSection() {
       )}
       {(actionError || exportError) && (
         <p className="text-destructive text-sm" role="alert">
-          {actionError?.message ?? exportError}
+          {actionError ? describeError(actionError) : exportError}
         </p>
       )}
 
@@ -496,7 +502,7 @@ export function HarnessConfigsSection() {
           </Button>
           {create.error && (
             <p className="text-destructive text-sm" role="alert">
-              {create.error.message}
+              {describeError(create.error)}
             </p>
           )}
         </form>

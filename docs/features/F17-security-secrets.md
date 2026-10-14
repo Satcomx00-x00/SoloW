@@ -18,7 +18,7 @@ protected and how the boundary between harnesses and credentials is kept safe.
 - As a user, I want my credentials stored safely and never shown again, so they cannot leak.
 - As an Operator, I want to be sure harness-run code cannot read the credentials it uses, so a
   misbehaving harness cannot exfiltrate them.
-- As a Team Lead, I want secrets scoped to a Workspace, so they are not shared beyond their
+- *(Later — team use.)* As a Team Lead, I want secrets scoped to a Workspace, so they are not shared beyond their
   intended reach.
 
 ## Functional requirements
@@ -30,13 +30,24 @@ protected and how the boundary between harnesses and credentials is kept safe.
 - **FR-3** Secrets are scoped to a Workspace and reused only within it.
 - **FR-4** Credentials are supplied to Harnesses without being exposed to the code a Harness runs
   (product [NFR-7](../product/03-product-requirements.md)).
+  Where this holds: the container executor ([F07](./F07-execution-environments.md)) hands in only
+  the run's one credential and keeps the encryption key and the database out of the mount set. It
+  does **not** hold on the local executor, which runs as the orchestrator's own user: the
+  environment is scrubbed of the control plane's secrets, but a local harness can still read any
+  file that user can. The local executor is for trusted agents only.
 - **FR-5** For Subscription-mode Harnesses, SoloW removes any conflicting credential from
   the Harness's run environment so billing cannot be diverted (see [F06](./F06-authentication-billing.md)).
 - **FR-6** Destructive actions on secrets (rotation, deletion) require confirmation and are
   recorded.
 - **FR-7** Shared exports are redacted so secrets never appear in them (see [F13](./F13-collaboration-sharing.md)).
 - **FR-8** In hosted deployment, access to a Workspace's secrets follows its access control
-  (see [F16](./F16-platform-deployment.md)).
+  (see [F16](./F16-platform-deployment.md)). *(Later: hosted deployment is not built.)*
+- **FR-9** Sign-in is on by default in every launcher: a fresh install asks for the Owner
+  account. The "every visitor is the Owner" mode (`SOLOW_DEV_OWNER=on`) is development-only,
+  never a launcher default, and is refused when the services are exposed to the network.
+- **FR-10** The web app, the orchestrator and the run engine listen on `127.0.0.1` by default.
+  `SOLOW_BIND_HOST=0.0.0.0` (or another interface) is the explicit, warned-about way to reach
+  them from the network.
 
 ## Non-functional requirements
 

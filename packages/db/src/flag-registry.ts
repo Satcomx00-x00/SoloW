@@ -33,7 +33,9 @@ export type FlagKey =
   | "ff-workflows"
   | "ff-agent-widgets"
   | "ff-agent-libraries"
-  | "ff-workspace-controls";
+  | "ff-workspace-controls"
+  | "ff-remote-environments"
+  | "ff-outcomes";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -91,7 +93,28 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
     default: true,
     granularity: "workspace",
   },
+  "ff-remote-environments": {
+    key: "ff-remote-environments",
+    description:
+      "Remote (SSH) and Cloud environments — the Executor kinds that have no driver yet. Hidden for 1.0 (decision 0031).",
+    default: false,
+    granularity: "workspace",
+  },
+  "ff-outcomes": {
+    key: "ff-outcomes",
+    description:
+      "Outcomes page: Tasks shipped per week, run-to-approval rate, attempts and token spend, read from recorded history (finding A4).",
+    default: true,
+    granularity: "workspace",
+  },
 };
+
+/**
+ * Flags that ship OFF — the one deliberate exception to "default ON" above (decision 0031).
+ * They hide unfinished surfaces for the 1.0 focus; the code behind them stays. Listing them here,
+ * rather than loosening the registry test, keeps a stray `default: false` a failure.
+ */
+export const HIDDEN_UNTIL_READY: readonly FlagKey[] = ["ff-remote-environments"];
 
 /** Every registered flag key — the one list callers should iterate or validate against. */
 export function flagKeys(): FlagKey[] {

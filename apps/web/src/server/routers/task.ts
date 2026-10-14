@@ -10,7 +10,11 @@ import {
   listTaskDependenciesInput,
   listTasksInput,
   moveTaskInput,
+  quickTaskDto,
+  quickTaskInput,
+  quickTaskProfiles,
   recentTaskListDto,
+  redeliverTaskInput,
   removeTaskDependencyInput,
   restoreTaskInput,
   retryTaskInput,
@@ -31,18 +35,19 @@ import {
   buildCreateTaskPayload,
   canOpenReview,
   canTransitionTask,
+  DELIVERY_FAILED_REASON,
   formatDependencyCycle,
   isLaunchable,
   unsatisfiedDependencies,
-  withinConcurrencyCap,
 } from "@solow/core";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";
-import { getIssueById } from "../dal/issue.js";
-import { getExecutorProfile, getHarnessProfile } from "../dal/profile.js";
+import { createIssue, getIssueById } from "../dal/issue.js";
+import { getTaskDefaults } from "../dal/preference.js";
+import { getExecutorProfile, getHarnessProfile, listProfileChoices } from "../dal/profile.js";
 import { listRecentTasks } from "../dal/recent-tasks.js";
-import { getRepository } from "../dal/repository.js";
+import { getRepository, listRepositories } from "../dal/repository.js";
 import {
   createSession,
   getLatestSession,
@@ -52,12 +57,12 @@ import {
 import {
   activeSessionForTask,
   addTaskDependencyEdge,
-  claimTaskState,
-  countRunningForHarnessProfile,
+  claimTaskRun,
   createSubtaskRecord,
   createTaskRecord,
   deleteTask,
   getTaskById,
+  keepUndeliveredLocal,
   listTaskDependencies,
   listTasks,
   removeTaskDependencyEdge,
@@ -114,8 +119,13 @@ export async function requireUnblocked(rctx: RequestContext, taskId: string): Pr
  * Workspace at its limit could be pushed past it by retrying rather than launching — the cap held
  * on the path people used least.
  */
-export async function startTaskRun(rctx: RequestContext, taskId: string): Promise<TaskDto> {
-  const existing = unwrap(await getTaskById(rctx, taskId));
+export async function startTaskRun(
+  rctx: RequestContext,
+  taskId: string,
+  /** The row as the caller just read it, so `launch` and `move` do not read it twice. */
+  read?: TaskDto,
+): Promise<TaskDto> {
+  const existing = read ?? unwrap(await getTaskById(rctx, taskId));
   // A Task at its gate is moved on by its decision (`review.decide`), never by a second start: a
   // launch from there ran a fresh harness beside the decision the gate was waiting for, and the
   // pair of them wrote the same Step's cursor in turn.
@@ -125,37 +135,35 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
   unwrap(canTransitionTask(existing.state, "running"));
   await requireUnblocked(rctx, existing.id);
 
-  // The Harness Profile concurrency cap (spec FR-017), on every path into `running`.
-  const profile = unwrap(await getHarnessProfile(rctx, existing.agentProfileId));
-  const running = await countRunningForHarnessProfile(rctx, existing.agentProfileId);
-  if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: TaskErrorCode.ConcurrencyCapReached,
-    });
-  }
-
   // Claimed from the state it was read in, and nothing else: a second click, a second tab or the
   // run itself moving the row in between makes this one lose cleanly instead of starting a
-  // second harness on the same worktree. Clears the last run's `failureReason` as it goes.
-  const updated = unwrap(await claimTaskState(rctx, existing.id, [existing.state], "running"));
-  const session = unwrap(await createSession(rctx, existing.id));
+  // second harness on the same worktree. The Harness Profile concurrency cap (spec FR-017) is
+  // part of the same write rather than a count read before it — see `claimTaskRun` for the race
+  // that let simultaneous starts all pass (F5). Clears the last run's `failureReason` as it goes.
+  const updated = unwrap(await claimTaskRun(rctx, existing.id, [existing.state]));
+  // Everything after the claim is inside the rollback: the claim holds a cap slot, and a Session
+  // that cannot be opened leaves a `running` row no harness will ever release.
+  let sessionId: string | null = null;
   try {
+    sessionId = unwrap(await createSession(rctx, existing.id)).id;
     await orchestrator.enqueueTaskRun({
       workspaceId: rctx.workspaceId,
       taskId: existing.id,
-      sessionId: session.id,
+      sessionId,
     });
   } catch (cause) {
     // Nothing will run, so the Task must not say something is. Put it back where it was and
     // close the Session no run will ever write to.
     await updateTaskState(rctx, existing.id, existing.state, {
       failureReason: existing.failureReason ?? null,
+      completedAt: existing.completedAt,
     });
-    await setSessionState(rctx, session.id, "closed", { endedAt: new Date().toISOString() });
+    if (sessionId) {
+      await setSessionState(rctx, sessionId, "closed", { endedAt: new Date().toISOString() });
+    }
     throw cause;
   }
-  await orchestrator.announceTask({
+  void orchestrator.announceTask({
     workspaceId: rctx.workspaceId,
     taskId: existing.id,
     state: updated.state,
@@ -200,6 +208,23 @@ async function forkCursorFor(
   if (cursor.ok) return cursor.data;
   if (input.forkSeq !== undefined) unwrap(cursor);
   return null;
+}
+
+/** The longest Issue/Task title a Quick task derives from its sentence. */
+const QUICK_TITLE_MAX = 120;
+
+/**
+ * A title for the Issue and Task a Quick task creates: the first non-empty line of the prompt,
+ * cut on a word boundary. The full text is kept as the Issue's description, so nothing the Owner
+ * typed is lost to the shortening.
+ */
+export function quickTaskTitle(prompt: string): string {
+  const first = prompt.split("\n").find((line) => line.trim().length > 0) ?? prompt;
+  const line = first.trim();
+  if (line.length <= QUICK_TITLE_MAX) return line;
+  const cut = line.slice(0, QUICK_TITLE_MAX - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > QUICK_TITLE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`;
 }
 
 export const taskRouter = router({
@@ -383,16 +408,95 @@ export const taskRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.NotReady });
       }
       await requireUnblocked(ctx.rctx, task.id);
-      // Enforce the Harness Profile concurrency cap (spec FR-017).
-      const profile = unwrap(await getHarnessProfile(ctx.rctx, task.agentProfileId));
-      const running = await countRunningForHarnessProfile(ctx.rctx, task.agentProfileId);
-      if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
+      // The concurrency cap is taken with the row, in `startTaskRun`.
+      return startTaskRun(ctx.rctx, task.id, task);
+    }),
+
+  quickStart: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.quickStart",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Quick task: from one sentence, create a local Issue and a Task under it and start the harness, using the Owner's default Harness and Executor Profiles. Names the Repository only when the Workspace has several.",
+      },
+    })
+    .use(rateLimit("task.launch"))
+    .input(quickTaskInput)
+    .output(quickTaskDto)
+    .mutation(async ({ ctx, input }) => {
+      const rctx = ctx.rctx;
+      // Everything that can be refused is resolved before the first write, so a Workspace that
+      // cannot run the work does not accumulate an Issue per attempt.
+      const repositories = unwrap(await listRepositories(rctx, { limit: 2 })).items;
+      let repositoryId = input.repositoryId;
+      if (repositoryId) {
+        unwrap(await getRepository(rctx, repositoryId));
+      } else if (repositories.length === 1) {
+        repositoryId = repositories[0]?.id;
+      }
+      if (!repositoryId) {
         throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: TaskErrorCode.ConcurrencyCapReached,
+          code: "BAD_REQUEST",
+          message:
+            repositories.length === 0
+              ? TaskErrorCode.RepositoryUnreachable
+              : TaskErrorCode.QuickNeedsRepository,
         });
       }
-      return startTaskRun(ctx.rctx, task.id);
+
+      const { agentProfileId, executorProfileId } = quickTaskProfiles({
+        stored: unwrap(await getTaskDefaults(rctx)).defaults,
+        ...(await listProfileChoices(rctx)),
+      });
+      if (!agentProfileId || !executorProfileId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.QuickNeedsProfiles });
+      }
+
+      const title = quickTaskTitle(input.prompt);
+      const issue = unwrap(
+        await createIssue(rctx, {
+          title,
+          description: input.prompt,
+          repositoryId,
+          labels: [],
+        }),
+      );
+      const payload = unwrap(
+        buildCreateTaskPayload(
+          {
+            issueId: issue.id,
+            title,
+            agentProfileId,
+            executorProfileId,
+            repositories: [{ repositoryId }],
+          },
+          { workspaceId: rctx.workspaceId },
+        ),
+      );
+      const created = unwrap(await createTaskRecord(rctx, payload));
+      // Backlog to Ready is the one step the board makes the Owner take by hand; a Quick task
+      // exists to skip it. If the start below is refused (the profile's concurrency cap, say),
+      // the Task is left Ready on the board where Launch retries it — and the refusal is the
+      // answer, not a throw, because the Issue and the Task exist now either way.
+      const ready = unwrap(await updateTaskState(rctx, created.id, "ready"));
+      try {
+        const started = await startTaskRun(rctx, created.id);
+        return { task: started, issueId: issue.id, started: true, reason: null };
+      } catch (cause) {
+        // A refusal by code is passed on as one; anything else is the orchestrator failing to
+        // take the event (`startTaskRun` already put the Task back to Ready).
+        const reason = cause instanceof TRPCError ? cause.message : TaskErrorCode.NoOrchestrator;
+        const current = await getTaskById(rctx, created.id);
+        return {
+          task: current.ok ? current.data : ready,
+          issueId: issue.id,
+          started: false,
+          reason,
+        };
+      }
     }),
 
   move: ownerProcedure
@@ -414,10 +518,10 @@ export const taskRouter = router({
       // Moving into `running` *is* starting, and now does it: same Session, same concurrency cap,
       // same publish to the durable engine as Launch and Retry. It used to write the column and
       // nothing else, which left a card in Running with no harness behind it and no way to tell.
-      if (input.to === "running") return startTaskRun(ctx.rctx, task.id);
+      if (input.to === "running") return startTaskRun(ctx.rctx, task.id, task);
       const moved = unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
       // Every client watching, not just the one that dragged the card.
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: moved.id,
         state: moved.state,
@@ -453,7 +557,7 @@ export const taskRouter = router({
       }
       unwrap(canTransitionTask(task.state, "review"));
       const opened = unwrap(await updateTaskState(ctx.rctx, task.id, "review"));
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: opened.id,
         state: opened.state,
@@ -476,7 +580,7 @@ export const taskRouter = router({
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
       const restored = unwrap(await restoreTask(ctx.rctx, input.id));
-      await orchestrator.announceTask({
+      void orchestrator.announceTask({
         workspaceId: ctx.rctx.workspaceId,
         taskId: restored.id,
         state: restored.state,
@@ -498,6 +602,56 @@ export const taskRouter = router({
     .input(retryTaskInput)
     .output(taskDto)
     .mutation(async ({ ctx, input }) => resumeTask(ctx.rctx, input.id)),
+
+  redeliver: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.redeliver",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Ship again: for a Task whose approval committed but could not be pushed or have its pull request opened, push the committed branch and open (or find) the request. Runs no harness and makes no commit; the Task moves to done when every branch has shipped.",
+      },
+    })
+    .input(redeliverTaskInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const task = unwrap(await getTaskById(ctx.rctx, input.id));
+      if (task.state !== "failed" || task.failureReason !== DELIVERY_FAILED_REASON) {
+        throw new TRPCError({ code: "CONFLICT", message: TaskErrorCode.NotUndelivered });
+      }
+      if (!orchestrator.isWired()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: TaskErrorCode.NoOrchestrator });
+      }
+      // Not claimed here: the Task stays as it is until the push lands, and the orchestrator
+      // re-checks it before touching the remote. A second click repeats an idempotent push.
+      await orchestrator.redeliverTask({ workspaceId: ctx.rctx.workspaceId, taskId: task.id });
+      return task;
+    }),
+
+  keepLocal: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.keepLocal",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Keep local: finish a Task whose approval committed but could not ship, with the branch committed on this machine as its result. Nothing is pushed.",
+      },
+    })
+    .input(redeliverTaskInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const kept = unwrap(await keepUndeliveredLocal(ctx.rctx, input.id));
+      void orchestrator.announceTask({
+        workspaceId: ctx.rctx.workspaceId,
+        taskId: kept.id,
+        state: kept.state,
+      });
+      return kept;
+    }),
 
   dependencies: ownerProcedure
     .meta({

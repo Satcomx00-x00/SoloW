@@ -94,6 +94,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import {
   branchRetarget,
@@ -115,6 +116,7 @@ import {
   stepDotColors,
   stepEdges,
 } from "@/lib/workflow-canvas";
+import { effectiveGate, FINISH_NAME, GATE_HINT, GATE_NAME } from "@/lib/workflow-gates";
 import { trpc } from "@/trpc/react";
 import { COMPACT_ZOOM, FIT_VIEW } from "./workflow-canvas-zoom";
 
@@ -149,24 +151,6 @@ import { COMPACT_ZOOM, FIT_VIEW } from "./workflow-canvas-zoom";
  * `validateWorkflowGraph`'s to find, and are said on the node in words rather than refused at
  * the keystroke: an operator building a loop passes through both on the way.
  */
-
-/**
- * What the gate means for the run, in the words the node summary uses. The gate is set with the
- * "Wait for review" button: on, the Step ends only when a person approves its review and the
- * next Step waits until then; off, the run moves on by itself — unless asked to still wait when
- * the Step changed files.
- */
-const GATE_LABELS: Record<WorkflowStepGate, string> = {
-  human: "Waits for review",
-  auto: "Moves on by itself",
-  "auto-unless-changes": "Waits for review if it changed files",
-  "agent-decides": "The AI decides on review",
-};
-
-const ADVANCE_LABELS: Record<WorkflowAdvanceOn, string> = {
-  "agent-signal": "Harness says done",
-  review: "Review recorded",
-};
 
 const CONDITION_LABELS: Record<WorkflowStepCondition["kind"], string> = {
   "agent-decides": "The harness decides",
@@ -1107,9 +1091,7 @@ function StepSummary({
         )}
       </div>
       <p className="truncate font-mono text-muted-foreground text-xs">{harness}</p>
-      <p className="text-2xs text-muted-foreground">
-        {GATE_LABELS[step.gate]} · {ADVANCE_LABELS[step.advanceOn]}
-      </p>
+      <p className="text-2xs text-muted-foreground">{GATE_NAME[effectiveGate(step)]}</p>
       {problems.length > 0 && (
         <p className="flex items-center gap-1.5 text-xs" role="alert">
           <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
@@ -1130,41 +1112,42 @@ function StepSummary({
  * straight on while one that touched the code still stops for a look. A three-way select used to
  * say this as "A human approves / Automatic / Automatic unless changed", and nothing on the board
  * then told a reviewer why a later Step had already run.
+ *
+ * The buttons show the gate the Step *behaves* as (`effectiveGate`), and choosing one that moves
+ * on also makes the Step finish on the harness's own signal. A Step finished by a review waits
+ * for that review whatever its gate says, so before this "Move on" on a new Step (which starts
+ * finished-by-review) changed nothing until "Finished when" was changed as well — two settings
+ * for one decision, and the first one silently ineffective.
  */
 function WaitForReview({
   step,
   save,
 }: {
   step: WorkflowStepDto;
-  save: (gate: WorkflowStepGate) => void;
+  save: (patch: { gate: WorkflowStepGate; advanceOn?: WorkflowAdvanceOn }) => void;
 }) {
-  const movesOn = step.gate === "auto" || step.gate === "auto-unless-changes";
+  const gate = effectiveGate(step);
+  const movesOn = gate === "auto" || gate === "auto-unless-changes";
+  const choose = (next: WorkflowStepGate) =>
+    save(
+      next !== "human" && step.advanceOn === "review"
+        ? { gate: next, advanceOn: "agent-signal" }
+        : { gate: next },
+    );
   const options: Array<{
     gate: WorkflowStepGate;
-    label: string;
     pressed: boolean;
     icon: typeof UserCheck;
   }> = [
-    { gate: "human", label: "Wait for review", pressed: step.gate === "human", icon: UserCheck },
-    {
-      gate: "agent-decides",
-      label: "AI decides",
-      pressed: step.gate === "agent-decides",
-      icon: BotMessageSquare,
-    },
-    { gate: "auto", label: "Move on", pressed: movesOn, icon: FastForward },
+    { gate: "human", pressed: gate === "human", icon: UserCheck },
+    { gate: "agent-decides", pressed: gate === "agent-decides", icon: BotMessageSquare },
+    { gate: "auto", pressed: movesOn, icon: FastForward },
   ];
   return (
     <div className="grid gap-1.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-medium text-xs">Review</span>
-        <span className="truncate text-2xs text-muted-foreground">
-          {step.gate === "agent-decides"
-            ? "The harness answers REVIEW: yes or no"
-            : step.gate === "human"
-              ? "The next step waits for your approval"
-              : "Questions it asks still wait for you"}
-        </span>
+        <span className="truncate text-2xs text-muted-foreground">{GATE_HINT[gate]}</span>
       </div>
       <fieldset
         aria-label={`Review for ${step.name}`}
@@ -1176,7 +1159,7 @@ function WaitForReview({
             type="button"
             aria-pressed={option.pressed}
             onClick={() => {
-              if (!option.pressed) save(option.gate);
+              if (!option.pressed) choose(option.gate);
             }}
             className={`flex h-7 min-w-0 items-center justify-center gap-1 rounded-md border px-1.5 font-medium text-xs transition-colors ${
               option.pressed
@@ -1185,7 +1168,7 @@ function WaitForReview({
             }`}
           >
             <option.icon aria-hidden className="size-3.5 shrink-0" />
-            <span className="truncate">{option.label}</span>
+            <span className="truncate">{GATE_NAME[option.gate]}</span>
           </button>
         ))}
       </fieldset>
@@ -1193,8 +1176,8 @@ function WaitForReview({
         <div className={`${FIELD} flex items-center gap-1.5`}>
           <Checkbox
             id={`step-wait-if-changed-${step.id}`}
-            checked={step.gate === "auto-unless-changes"}
-            onCheckedChange={(on) => save(on === true ? "auto-unless-changes" : "auto")}
+            checked={gate === "auto-unless-changes"}
+            onCheckedChange={(on) => choose(on === true ? "auto-unless-changes" : "auto")}
           />
           <Label
             htmlFor={`step-wait-if-changed-${step.id}`}
@@ -1373,7 +1356,7 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
             <div className="grid gap-2">
               <WaitForReview
                 step={step}
-                save={(gate) => update.mutate({ stepId: step.id, gate })}
+                save={(patch) => update.mutate({ stepId: step.id, ...patch })}
               />
               <div className="grid gap-1.5">
                 <Label htmlFor={`step-advance-${step.id}`} className="text-xs">
@@ -1381,8 +1364,16 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
                 </Label>
                 <Select
                   value={step.advanceOn}
+                  // Finishing on a review is waiting for one, so it takes the gate along: left on
+                  // "Move on", the two settings would say opposite things about the same Step.
                   onValueChange={(v) =>
-                    update.mutate({ stepId: step.id, advanceOn: v as WorkflowAdvanceOn })
+                    update.mutate({
+                      stepId: step.id,
+                      advanceOn: v as WorkflowAdvanceOn,
+                      ...(v === "review" && step.gate !== "human"
+                        ? { gate: "human" as const }
+                        : {}),
+                    })
                   }
                 >
                   <SelectTrigger
@@ -1392,7 +1383,7 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(ADVANCE_LABELS).map(([value, label]) => (
+                    {Object.entries(FINISH_NAME).map(([value, label]) => (
                       <SelectItem key={value} value={value}>
                         {label}
                       </SelectItem>
@@ -1420,8 +1411,8 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
               save={(branch) => update.mutate({ stepId: step.id, branch })}
             />
             {(update.error || remove.error) && (
-              <p className="font-mono text-state-failed text-xs" role="alert">
-                {(update.error ?? remove.error)?.message}
+              <p className="text-state-failed text-xs" role="alert">
+                {describeError(update.error ?? remove.error)}
               </p>
             )}
           </div>
@@ -1955,16 +1946,13 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
         )}
         {/* The pipeline's name floats on the canvas instead of sitting in a header strip: a band
             above a full-bleed canvas would take back the vertical space going full-bleed just
-            won. The WIP badge rides with it — the Monitor half of F03 (a run's live position on
-            this graph) is not built yet, and the badge says so before a click does. */}
+            won. No "WIP" badge beside it: Workflows are on the supported line (decision 0031), and
+            a live run is watched on its Task's Steps, not here. */}
         <Panel
           position="top-left"
           className="flex items-center gap-2 rounded-lg border bg-card/85 px-2.5 py-1.5 shadow-sm backdrop-blur"
         >
           <span className="font-medium text-sm">{workflow.name}</span>
-          <Badge variant="outline" className="text-2xs">
-            WIP
-          </Badge>
         </Panel>
         {workflow.steps.length === 0 && (
           <Panel position="top-center" className="flex flex-col items-center gap-2 pt-16">
@@ -1989,8 +1977,8 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
         )}
         {error && (
           <Panel position="bottom-center">
-            <p className="font-mono text-state-failed text-xs" role="alert">
-              {error.message}
+            <p className="text-state-failed text-xs" role="alert">
+              {describeError(error)}
             </p>
           </Panel>
         )}

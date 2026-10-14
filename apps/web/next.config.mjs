@@ -7,9 +7,9 @@ const nextConfig = {
   /**
    * Where the build output goes, overridable so two Next servers can share this checkout.
    *
-   * The E2E suite starts its own `next dev` in this directory while `scripts/start.sh` may be
-   * serving a production build from the same one, and they both default to `.next`. The dev
-   * server wins, silently: it replaces the built output with development chunks, `BUILD_ID`
+   * The E2E suite builds and serves its own copy of the app in this directory while `scripts/start.sh` may be
+   * serving a production build from the same one, and they both default to `.next`. When the suite ran `next dev`, the
+   * dev server won, silently: it replaces the built output with development chunks, `BUILD_ID`
    * empties, and the running production server answers **400 on every static asset** while still
    * serving HTML — a blank app with no error anywhere that names the cause. Diagnosed exactly
    * that way, from a browser console full of chunk 404s.
@@ -53,6 +53,20 @@ const nextConfig = {
     webpackBuildWorker: true,
     parallelServerCompiles: true,
     parallelServerBuildTraces: true,
+    /**
+     * Import a barrel's members from the files that define them, not through the barrel.
+     *
+     * `@solow/core` and `@solow/contracts` are `export *` barrels, and neither declares
+     * `sideEffects: false` — so webpack had to keep every module either of them reaches. One
+     * `createRegistry` import in the shell was enough to put the whole of `@solow/core` in the
+     * layout chunk, the 270 KB vendored workflow store included: ~99 KB gzipped of skill text
+     * downloaded on every page, used only by the store dialog. Both barrels are pure
+     * re-exports with no import-time side effects, which is what makes this rewrite safe.
+     *
+     * `radix-ui` is the umbrella package re-exporting every primitive; production tree-shakes
+     * it already, but `next dev` compiles the lot for each route that touches one.
+     */
+    optimizePackageImports: ["@solow/core", "@solow/contracts", "radix-ui"],
   },
   // The DB package uses Bun's built-in `bun:sqlite`; keep it as a runtime import (not bundled)
   // so the webpack build never tries to resolve the `bun:` builtin. The app runs under the Bun

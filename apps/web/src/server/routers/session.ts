@@ -51,6 +51,7 @@ function toSessionDto(row: SessionRow): SessionDto {
     diffRef: row.diffRef,
     startedAt: row.startedAt,
     endedAt: row.endedAt,
+    eventsPrunedAt: row.eventsPrunedAt ?? null,
   };
 }
 

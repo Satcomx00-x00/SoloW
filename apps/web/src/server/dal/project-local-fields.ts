@@ -42,11 +42,13 @@ import type {
  * table — is a real feature, just not this one.
  */
 
-const SCOPE_ALIASES: Record<string, string[]> = {
+// Named keys rather than a `Record`, so no lookup needs a `?? []` — a fresh array there would be
+// a new key in the pattern cache below on every call.
+const SCOPE_ALIASES = {
   status: ["status"],
   priority: ["priority", "prio", "pri"],
   size: ["size"],
-};
+} satisfies Record<string, string[]>;
 
 // The pattern's own end-anchor, built separately from the template literal it closes: a regex
 // end-anchor written directly before a template literal's closing backtick is, by coincidence,
@@ -55,8 +57,23 @@ const SCOPE_ALIASES: Record<string, string[]> = {
 // out is cheaper than teaching that scanner syntax it was never meant to parse.
 const END_OF_LABEL = "$";
 
+/**
+ * Compiled once per alias list. `deriveLocalProjectFields` asks for three patterns per Issue, over
+ * up to `PROJECT_ITEM_CEILING` Issues, and the lists are the fixed arrays in `SCOPE_ALIASES` — so
+ * they key the cache by identity. Safe to share: no `g` flag, so `test`/`exec` keep no state.
+ */
+const scopePatterns = new Map<string[], RegExp>();
+
 function scopePattern(aliases: string[]): RegExp {
-  return new RegExp(`^(?:${aliases.join("|")})\\s*(?:::|[:/\\-_\\s])\\s*(.+)${END_OF_LABEL}`, "i");
+  let pattern = scopePatterns.get(aliases);
+  if (!pattern) {
+    pattern = new RegExp(
+      `^(?:${aliases.join("|")})\\s*(?:::|[:/\\-_\\s])\\s*(.+)${END_OF_LABEL}`,
+      "i",
+    );
+    scopePatterns.set(aliases, pattern);
+  }
+  return pattern;
 }
 
 function scopedOptions(labels: Iterable<string>, aliases: string[]): ProjectFieldOption[] {
@@ -128,7 +145,7 @@ function fieldSpecs(allLabels: string[]): FieldSpec[] {
       id: "local:status",
       name: "Status",
       type: "single_select",
-      options: scopedOptions(allLabels, SCOPE_ALIASES.status ?? []),
+      options: scopedOptions(allLabels, SCOPE_ALIASES.status),
     },
     { id: "local:labels", name: "Labels", type: "text" },
     { id: "local:linked_change_requests", name: "Linked pull requests", type: "text" },
@@ -144,13 +161,13 @@ function fieldSpecs(allLabels: string[]): FieldSpec[] {
       id: "local:priority",
       name: "Priority",
       type: "single_select",
-      options: scopedOptions(allLabels, SCOPE_ALIASES.priority ?? []),
+      options: scopedOptions(allLabels, SCOPE_ALIASES.priority),
     },
     {
       id: "local:size",
       name: "Size",
       type: "single_select",
-      options: scopedOptions(allLabels, SCOPE_ALIASES.size ?? []),
+      options: scopedOptions(allLabels, SCOPE_ALIASES.size),
     },
     // Unexpressible for the same reason GitLab's own mirrored Projects declare them so (Decision
     // 0018): there is no per-issue number/date/iteration field a local Project could read one
@@ -210,7 +227,7 @@ export function deriveLocalProjectFields(issues: readonly LocalFieldIssue[]): {
     if (issue.assignees.length > 0) {
       values["local:assignees"] = { type: "user", users: issue.assignees };
     }
-    const status = scopedValue(issue.labels, SCOPE_ALIASES.status ?? []);
+    const status = scopedValue(issue.labels, SCOPE_ALIASES.status);
     if (status) values["local:status"] = status;
     if (issue.labels.length > 0) {
       values["local:labels"] = { type: "text", text: issue.labels.join(", ") };
@@ -242,9 +259,9 @@ export function deriveLocalProjectFields(issues: readonly LocalFieldIssue[]): {
         text: issue.externalState === "closed" ? "Yes" : "No",
       };
     }
-    const priority = scopedValue(issue.labels, SCOPE_ALIASES.priority ?? []);
+    const priority = scopedValue(issue.labels, SCOPE_ALIASES.priority);
     if (priority) values["local:priority"] = priority;
-    const size = scopedValue(issue.labels, SCOPE_ALIASES.size ?? []);
+    const size = scopedValue(issue.labels, SCOPE_ALIASES.size);
     if (size) values["local:size"] = size;
 
     valuesByIssueId.set(issue.id, values);

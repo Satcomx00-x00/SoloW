@@ -79,6 +79,12 @@ export const repositoryDto = z
      */
     provider: z.string().nullable(),
     integrationBaseUrl: z.string().nullable(),
+    /**
+     * What approval opens on the provider — "pull request", "merge request" — or null when
+     * approval cannot ship from this Repository and commits locally (A1). Derived, never stored.
+     * Optional so a client built before the field existed still parses a row.
+     */
+    changeRequestNoun: z.string().nullable().optional(),
     /** How many Issues this Repository currently holds — for a picker to show before it commits. */
     issueCount: z.number().int().nonnegative(),
     /**

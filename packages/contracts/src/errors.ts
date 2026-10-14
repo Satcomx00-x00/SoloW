@@ -61,6 +61,26 @@ export const TaskErrorCode = {
    * was read in — another click, another tab, or the run itself moved it.
    */
   AlreadyStarted: "TASK_ALREADY_STARTED",
+  /**
+   * A Quick task in a Workspace with several Repositories and none named. The server will not
+   * guess which codebase an agent should edit.
+   */
+  QuickNeedsRepository: "TASK_QUICK_NEEDS_REPOSITORY",
+  /**
+   * A Quick task before any Harness Profile or Executor Profile exists: there is nothing to run
+   * the work with, and the fix lives in Settings, not in the sentence the Owner typed.
+   */
+  QuickNeedsProfiles: "TASK_QUICK_NEEDS_PROFILES",
+  /**
+   * Ship again, or Keep local, on a Task that is not an approval waiting to ship — it shipped in
+   * the meantime, or it failed for another reason, which Retry is for.
+   */
+  NotUndelivered: "TASK_NOT_UNDELIVERED",
+  /**
+   * No orchestrator is running, or it would not take the event: nothing could push a branch for
+   * Ship again, or start the run a Quick task asked for.
+   */
+  NoOrchestrator: "TASK_NO_ORCHESTRATOR",
 } as const;
 export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
 

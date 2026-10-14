@@ -1,6 +1,6 @@
 name: Release
 
-# Cuts a release when the commits merged to main say one is due.
+# Once a week, cuts a release if the commits merged to main since the last one say it is due.
 #
 # The version used to be decided by hand, in the pull request that earned it, and this workflow
 # only noticed afterwards: it read `packages/cli/package.json` and tagged it if the tag was new.
@@ -16,13 +16,12 @@ name: Release
 # `packages/cli/scripts/next-version.ts`, under test, rather than in shell here: it is the one part
 # of a release that can be wrong without failing, and YAML cannot be unit-tested.
 #
-# A run of `chore`, `docs`, `test`, `refactor`, `style`, `build` or `ci` commits releases nothing.
-# That is also what stops this from recurring: the commit it pushes is a `chore(release)`, and the
-# tag it pushes points at that very commit — so the Verify run it triggers finds an empty range and
-# cuts nothing.
+# A run of `chore`, `docs`, `test`, `refactor`, `style`, `build` or `ci` commits releases nothing,
+# and the `chore(release)` commit this pushes is one of those, so the range after a release starts
+# empty.
 #
-# Gated on Verify rather than on the push, so a red main cannot ship. `workflow_run` is what makes
-# that expressible: it fires after Verify finishes and carries its conclusion and its commit.
+# Gated on Verify: the job releases main's tip only if a push-to-main Verify run finished green on
+# that exact commit (see "Stand down unless Verify passed on main's tip").
 #
 # Publish is *dispatched* rather than left to its own `push: tags` trigger, and that is not a
 # stylistic choice — a tag pushed with the built-in GITHUB_TOKEN deliberately does not start a new
@@ -30,10 +29,14 @@ name: Release
 # `workflow_dispatch` is one of the two events documented as exempt from that rule. The same rule
 # is why there is no double-publish to guard against: only this dispatch starts Publish.
 
+# Weekly, not per merge (CONVENTIONS, "Weekly releases"). This used to fire on every green Verify
+# run on main, which shipped every `feat` or `fix` the moment it landed and left the weekly cadence
+# a rule nothing enforced. A dispatch is the way to cut one between Mondays — a security fix, say.
 on:
-  workflow_run:
-    workflows: ["Verify"]
-    types: [completed]
+  schedule:
+    # Monday 06:00 UTC: early enough that a bad release meets a working week, not a weekend.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 # One release at a time, and never cancel one — a half-finished tag-and-ship is worse than a queue.
 concurrency:
@@ -44,54 +47,50 @@ concurrency:
 permissions:
   # Push the release commit and its tag.
   contents: write
-  # Dispatch Publish.
+  # Dispatch Publish, and read Verify's runs to find out whether main's tip passed.
   actions: write
 
 jobs:
   release:
     name: Bump the version the commits ask for, and ship it
-    # Verify runs on pull requests too, and on branches that are not main; a release may come from
-    # exactly one of its runs — the one that went green on a push to main.
-    if: >-
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.conclusion == 'success'
+    # A dispatch from another branch would release that branch's tree under main's name.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # The commit Verify actually passed on, not whatever main's tip has become since — and the
-      # whole history with it, because "what has happened since the last release" is a question
-      # about the log and a shallow clone cannot answer it. `fetch-depth: 0` brings the tags too,
-      # which is how the last release is found at all.
+      # Main's tip and the whole history with it, because "what has happened since the last
+      # release" is a question about the log and a shallow clone cannot answer it.
+      # `fetch-depth: 0` brings the tags too, which is how the last release is found at all.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
 
-      # This job is about to *commit* to main, which the old one never did — it only tagged. That
-      # makes a moved tip a different kind of problem: the commits between the tested tree and
-      # main's tip have not been through Verify, and committing on top of them would release them.
+      # Gated on Verify, so a red main cannot ship — every job of it, the end-to-end suite and, on
+      # a push to main, the control check included. The tip checked out above must be the very
+      # commit a push-to-main Verify run finished green on: this job is about to commit on top of
+      # it, and anything Verify has not passed would be released with it.
       #
-      # Standing down is safe rather than lossy. Whatever landed in between had its own push to
-      # main, so it has its own Verify run and its own Release run behind it, and that run sees a
-      # tip that matches. The release is deferred by one merge, never dropped.
-      - name: Stand down if main has moved past the tree Verify passed
+      # Standing down is safe rather than lossy. A tip still being verified, or red, is released by
+      # the next weekly run (or a dispatch) once it is green; nothing is dropped, only deferred.
+      - name: Stand down unless Verify passed on main's tip
         id: tip
         env:
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git fetch --quiet origin main
-          tip="$(git rev-parse origin/main)"
-          if [ "$tip" != "$SHA" ]; then
-            echo "current=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::main has moved to ${tip} since Verify passed on ${SHA}; that merge's own run will release."
-          else
+          sha="$(git rev-parse HEAD)"
+          conclusion="$(gh run list --workflow verify.yml --branch main --event push \
+            --commit "$sha" --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
+          if [ "$conclusion" = "success" ]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Verify has not passed on main's tip ${sha} (${conclusion:-no finished run}); nothing is released until it does."
           fi
 
       - name: Read what the commits since the last release ask for
@@ -108,9 +107,11 @@ jobs:
             echo "release=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Nothing since ${last:-the beginning} asks for a release — no feat, fix, perf or breaking change."
           else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "version=${next}" >> "$GITHUB_OUTPUT"
-            echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+            {
+              echo "release=true"
+              echo "version=${next}"
+              echo "tag=v${next}"
+            } >> "$GITHUB_OUTPUT"
             echo "::notice::${last:-The beginning} → v${next}."
           fi
 

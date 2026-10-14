@@ -101,7 +101,7 @@ describe("Sidebar — the same destinations everywhere", () => {
       within(workspace)
         .getAllByRole("link")
         .map((l) => l.getAttribute("href")),
-    ).toEqual(["/unassigned", "/workflows", "/history"]);
+    ).toEqual(["/unassigned", "/workflows", "/history", "/outcomes"]);
     expect(current().map((l) => l.textContent)).toEqual(["History"]);
   });
 
@@ -294,7 +294,7 @@ describe("Sidebar — Workflows, edge cases", () => {
       handlers({ "workflow.list": () => [] }),
     );
 
-    await waitFor(() => expect(current().map((l) => l.textContent)).toEqual(["WorkflowsWIP"]));
+    await waitFor(() => expect(current().map((l) => l.textContent)).toEqual(["Workflows"]));
     expect(screen.queryByRole("list", { name: "Workflows" })).toBeNull();
   });
 
@@ -401,6 +401,22 @@ describe("Breadcrumb", () => {
     );
   });
 
+  it("names a Project's overview once per level, though two of its crumbs share an address", async () => {
+    // The overview is the Planning section, so the Project and Planning crumbs both link to it.
+    const logged: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => logged.push(args);
+    try {
+      pathname = "/projects/proj-1";
+      renderWithTrpc(<HeaderBar />, handlers());
+
+      await waitFor(() => expect(crumbs()).toEqual(["Projects", "Features ToDeb", "Planning"]));
+      expect(logged.filter((args) => String(args[0]).includes("same key"))).toEqual([]);
+    } finally {
+      console.error = original;
+    }
+  });
+
   it("places a Task under its Project's board, ending on the Task's title", async () => {
     pathname = "/task/t1";
     renderWithTrpc(
@@ -422,6 +438,17 @@ describe("Breadcrumb", () => {
     renderWithTrpc(<HeaderBar />, handlers());
 
     await waitFor(() => expect(crumbs()).toEqual(["Settings", "Secrets"]));
+  });
+
+  it("places the guided setup under the Settings section that opens it", async () => {
+    pathname = "/setup";
+    renderWithTrpc(<HeaderBar />, handlers());
+
+    await waitFor(() => expect(crumbs()).toEqual(["Settings", "Workspace", "Guided setup"]));
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getByRole("link", { name: "Workspace" }).getAttribute("href")).toBe(
+      "/settings?section=workspace",
+    );
   });
 
   it("places an Issue under its Project's Issues, ending on the Issue's title", async () => {
@@ -529,11 +556,13 @@ describe("Sidebar — the foot of the column", () => {
     expect(screen.getByRole("link", { name: "Unassigned" }).textContent).toBe("Unassigned");
   });
 
-  it("marks Workflows as work in progress for a screen reader as well as by eye", async () => {
+  it("names Workflows plainly, with no work-in-progress marker", async () => {
+    // Workflows are on the supported line (decision 0031): a "WIP" badge on a finished,
+    // supported area told a newcomer to stay away from it (finding D5).
     pathname = "/projects";
     renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, handlers());
-    const workflows = screen.getByRole("link", { name: /Workflows/ });
-    expect(workflows.getAttribute("title")).toBe("Workflows (work in progress)");
-    expect(workflows.textContent).toContain("WIP");
+    const workflows = screen.getByRole("link", { name: "Workflows" });
+    expect(workflows.getAttribute("title")).toBeNull();
+    expect(workflows.textContent).toBe("Workflows");
   });
 });

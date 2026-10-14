@@ -40,6 +40,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  type ComponentProps,
   type CSSProperties,
   type ReactNode,
   useCallback,
@@ -98,8 +99,9 @@ import {
   boardColumns,
   boardTally,
   needsYou,
+  persistedStepFacts,
   type StepHistory,
-  stepFacts,
+  withLiveStepFacts,
 } from "./task-board-model";
 import {
   AsksNode,
@@ -122,7 +124,8 @@ import {
   type StepCardWidget,
   type TaskCompleteWidget,
 } from "./todo-list";
-import { buildTranscript, inStepScope } from "./transcript";
+import { buildTranscriptFrom, inStepScope, preparePersistedTranscript } from "./transcript";
+import { TranscriptPrunedNotice } from "./transcript-pruned-notice";
 import { useStepScope, WorkflowPosition } from "./workflow-steps";
 
 /**
@@ -148,6 +151,8 @@ const NO_DIFFS: TaskDiffDto[] = [];
 const NO_ATTACHMENTS: TaskRepositoryDto[] = [];
 const NO_ROUNDS: SessionRoundDto[] = [];
 const NO_STEP_IDS: readonly string[] = [];
+const NO_COLUMNS: BoardColumn[] = [];
+const NO_GATE_LINES = { headline: "", detail: "" };
 
 const STREAM_LABEL: Record<string, string> = {
   idle: "Not streaming",
@@ -189,13 +194,14 @@ function CompletionBadge({ outcome }: { outcome: string | null }) {
 
 /**
  * The page's views: the board, and the two pieces of evidence a gate is decided on — the brief
- * and the change. The board is where the run is watched and every question answered, and it
+ * and the change. The interface calls the board "Steps": "Board" is the Project's Kanban, and one
+ * word with two meanings was the confusion (E4). The code keeps its own name for it. The board is where the run is watched and every question answered, and it
  * replaces the Run and Plan tabs it grew out of: the log moved to the terminal beside it and the
  * plan is on the board, under the Step it belongs to. The gate is on the board too, and under
  * the brief and the change as a bar, so it is never a view away.
  */
-type WorkspaceTab = "board" | "brief" | "changes";
-const TABS: readonly WorkspaceTab[] = ["board", "brief", "changes"];
+type WorkspaceTab = "steps" | "brief" | "changes";
+const TABS: readonly WorkspaceTab[] = ["steps", "brief", "changes"];
 /** The terminal pane's id, for the button that opens it. */
 const TERMINAL_PANE_ID = "task-terminal-pane";
 
@@ -285,7 +291,7 @@ const STATE_SENTENCE: Record<TaskState, string> = {
   review: "At the gate — your decision is what moves it.",
   done: "Finished.",
   failed: "The last run failed.",
-  parked: "Paused on quota until the window resets.",
+  parked: "Paused on a usage limit. It tries again by itself five hours after it stopped.",
 };
 
 /**
@@ -400,9 +406,9 @@ function BoardLegend({
   const row =
     "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50";
   return (
-    <nav aria-label="On the board" className="px-2 pt-4 pb-3">
+    <nav aria-label="In Steps" className="px-2 pt-4 pb-3">
       <p className="px-2 pb-1.5 font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
-        On the board
+        In Steps
       </p>
       <ul className="space-y-px">
         <li>
@@ -654,6 +660,9 @@ const TERMINAL_DEFAULT = 520;
 const terminalMax = () =>
   typeof window === "undefined" ? 1200 : Math.max(TERMINAL_MIN, window.innerWidth * 0.65);
 
+const clampTerminalWidth = (next: number) =>
+  Math.round(Math.min(terminalMax(), Math.max(TERMINAL_MIN, next)));
+
 type TerminalWidth = ReturnType<typeof useTerminalWidth>;
 
 /**
@@ -671,7 +680,7 @@ function useTerminalWidth() {
     }
   });
   const setWidth = useCallback((next: number) => {
-    const clamped = Math.round(Math.min(terminalMax(), Math.max(TERMINAL_MIN, next)));
+    const clamped = clampTerminalWidth(next);
     setWidthState(clamped);
     try {
       window.localStorage.setItem(TERMINAL_WIDTH_KEY, String(clamped));
@@ -698,15 +707,31 @@ function TerminalResizer({ handle }: { handle: TerminalWidth }) {
       className="-left-1 absolute inset-y-0 z-10 hidden w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-transparent after:transition-colors hover:after:bg-ring focus-visible:after:bg-ring md:block"
       onPointerDown={(event) => {
         event.preventDefault();
+        const separator = event.currentTarget;
+        // The pane whose `--terminal-width` this edge drives.
+        const pane = separator.parentElement;
         const startX = event.clientX;
         const start = width;
-        const move = (e: PointerEvent) => setWidth(start + (startX - e.clientX));
+        let dragged = start;
+        /*
+         * The width lives in `TaskWorkspace`, so setting it per pointer event re-rendered the whole
+         * page — board, diff and all — and wrote `localStorage`, dozens of times a second. The
+         * drag paints straight onto the pane instead, and the width is set once, on release.
+         */
+        const move = (e: PointerEvent) => {
+          dragged = clampTerminalWidth(start + (startX - e.clientX));
+          pane?.style.setProperty("--terminal-width", `${dragged}px`);
+          separator.setAttribute("aria-valuenow", String(dragged));
+        };
         const up = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
+          window.removeEventListener("pointercancel", up);
+          setWidth(dragged);
         };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
       }}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 80 : 20;
@@ -714,6 +739,33 @@ function TerminalResizer({ handle }: { handle: TerminalWidth }) {
         else if (event.key === "ArrowRight") setWidth(width - step);
         else return;
         event.preventDefault();
+      }}
+    />
+  );
+}
+
+/**
+ * The composer with the text it is holding.
+ *
+ * The draft is the composer's own state, not the page's: held in `TaskWorkspace`, every keystroke
+ * re-rendered the whole Task page — the board's nodes, the kept-mounted Brief and Changes panels
+ * and every diff row in them — to change one textarea. Only a send needs to reach the page.
+ */
+function SteerComposer({
+  onSend,
+  ...props
+}: Omit<ComponentProps<typeof HarnessComposer>, "value" | "onChange" | "onSubmit"> & {
+  /** True when the text was taken, sent or queued, and the field should clear. */
+  onSend: (text: string) => boolean;
+}) {
+  const [input, setInput] = useState("");
+  return (
+    <HarnessComposer
+      {...props}
+      value={input}
+      onChange={setInput}
+      onSubmit={() => {
+        if (onSend(input)) setInput("");
       }}
     />
   );
@@ -796,35 +848,50 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * once, which is harmless.
    */
   const seenLinks = useRef<Set<string>>(new Set());
+  const refreshTask = useCallback(() => {
+    utils.task.get.invalidate({ id: taskId });
+    utils.session.listForTask.invalidate({ taskId });
+    utils.session.get.invalidate();
+    // A Step advancing announces the state too, so this is what moves the step strip.
+    utils.workflow.taskBinding.invalidate({ taskId });
+    // …and what tells a Step's passes apart on the board, when the Workflow loops.
+    utils.session.stepDecisions.invalidate({ taskId });
+    // Readiness is derived from the blockers' states, so a predecessor finishing is what
+    // un-refuses Launch here — the board re-reads the edges on every status for the same reason.
+    utils.task.dependencies.invalidate();
+    // The Issue above this Task derives its status from the Tasks under it, so a run that
+    // finishes changes what the Issues list and the board card would say. Both are a
+    // navigation away and would otherwise be stale on arrival.
+    utils.issue.list.invalidate();
+    utils.task.list.invalidate();
+  }, [utils, taskId]);
   const onLive = useCallback(
     (event: TaskEvent) => {
       // A merge request opened mid-run produces no `status` and no `diff`, so nothing below
       // would refetch the Session that holds the link. Noticing it here is what puts the button
       // on the page while the run is still going (see `noticesNewRunLink`).
       if (noticesNewRunLink(event, seenLinks.current)) utils.session.get.invalidate();
-      if (event.kind === "status" || event.kind === "diff") {
-        utils.task.get.invalidate({ id: taskId });
-        utils.session.listForTask.invalidate({ taskId });
-        utils.session.get.invalidate();
-        // A Step advancing announces the state too, so this is what moves the step strip.
-        utils.workflow.taskBinding.invalidate({ taskId });
-        // …and what tells a Step's passes apart on the board, when the Workflow loops.
-        utils.session.stepDecisions.invalidate({ taskId });
-        // Readiness is derived from the blockers' states, so a predecessor finishing is what
-        // un-refuses Launch here — the board re-reads the edges on every status for the same reason.
-        utils.task.dependencies.invalidate();
-        // The Issue above this Task derives its status from the Tasks under it, so a run that
-        // finishes changes what the Issues list and the board card would say. Both are a
-        // navigation away and would otherwise be stale on arrival.
-        utils.issue.list.invalidate();
-        utils.task.list.invalidate();
-      }
+      if (event.kind === "status" || event.kind === "diff") refreshTask();
     },
-    [utils, taskId],
+    [utils, refreshTask],
   );
   const [ack, setAck] = useState<TaskInputAck | null>(null);
   const onAck = useCallback((next: TaskInputAck) => setAck(next), []);
   const live = useTaskStream(taskId, { onEvent: onLive, onAck });
+  /*
+   * Read again each time the stream (re)opens, because the stream does not replay state.
+   *
+   * The page's queries answer when they answer and the socket subscribes when it subscribes, and
+   * a `status` frame published in between reached nobody: the reconnect replay carries the
+   * transcript, not state changes (`ws/replay.ts` gives `state` rows no wire form). A Step that
+   * advanced in that gap left the strip on "Step 1 of 2" for good — the shape of the control
+   * check's one failure once its pages became fast enough to open the gap — and a socket that dropped and came
+   * back (a laptop waking) missed whatever changed while it was down. Once open, everything later
+   * arrives live, so one re-read here closes it.
+   */
+  useEffect(() => {
+    if (live.status === "open") refreshTask();
+  }, [live.status, refreshTask]);
   const router = useRouter();
   /**
    * A steer typed while the stream was away (TASK-022).
@@ -866,17 +933,23 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   /**
    * Which view is showing, when the operator has said.
    *
-   * The board by default, in every state: the run, its questions and its gate are all on it. A
-   * manual pick sticks until the Task changes state — a reviewer who opened the change during the
-   * run is taken back to the board when the gate opens on it. The pick is also in the URL
+   * The board by default; the Changes view when the Task is *already* waiting at its gate on
+   * arrival (E7), so a decision is one click from wherever the link came from. Only on arrival: a
+   * gate that opens while the page is up leaves the view where it is — the board is what the
+   * operator was watching, an intermediate Workflow gate lives on it, and a view that moves by
+   * itself loses the reader's place. A manual pick sticks until the Task changes state. The pick is also in the URL
    * (`?tab=`), so a refresh stays put and a link to the Changes view is a link to the Changes
-   * view; it is read once, on arrival, and written on every pick. An old `?tab=run` or `?tab=plan`
-   * is not a view any more, and reads as no pick at all — which lands on the board, where both went.
+   * view; it is read once, on arrival, and written on every pick. An old `?tab=run`, `?tab=plan` or
+   * `?tab=board` is not a view any more, and reads as no pick at all — which lands on the board,
+   * where all three went.
    */
   const [urlTab, setUrlTab] = useUrlTab("tab", TABS);
   const [tabPick, setTabPick] = useState<{ tab: WorkspaceTab; state: TaskState | null } | null>(
     () => (urlTab ? { tab: urlTab, state: null } : null),
   );
+  // Whether this Task was at its gate when the page first saw it — the only case that opens on
+  // Changes. Cleared once it leaves the gate, so a later gate opened in view does not move it.
+  const landedAtGate = useRef<{ taskId: string; atGate: boolean } | null>(null);
   /**
    * The terminal pane, beside the board rather than instead of it: the board stays in the middle
    * and in sync, and an answer typed in the terminal settles the node on the board as well,
@@ -939,9 +1012,33 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         : live.events.filter((event) => inStepScope(event, scope.selected)),
     [live.events, scope.selected],
   );
-  const rows = useMemo(() => buildTranscript(events, liveEvents), [events, liveEvents]);
+  // The persisted half prepared once per answer, so a frame folds in only what it brought.
+  const persistedTranscript = useMemo(() => preparePersistedTranscript(events), [events]);
+  const rows = useMemo(
+    () => buildTranscriptFrom(persistedTranscript, liveEvents),
+    [persistedTranscript, liveEvents],
+  );
 
   const liveSessionId = latest?.id;
+  /*
+   * The persisted half of each reading below, folded once per `session.get` answer. The stream
+   * re-renders this page once per animation frame while a run is live, and every one of these
+   * used to walk the whole persisted log again — thousands of events on a long run — to lay the
+   * same few live frames on top.
+   */
+  const persistedStepCard = useMemo(() => latestStepCard(events), [events]);
+  const persistedCompletion = useMemo(() => latestCompletion(events), [events]);
+  const persistedDecisions = useMemo(() => {
+    const byId = new Map<string, DecisionWidget>();
+    for (const event of events) {
+      const payload = event.payload;
+      if (payload.kind === "widget" && payload.widget.kind === "decision") {
+        byId.set(payload.widget.id, payload.widget);
+      }
+    }
+    return byId;
+  }, [events]);
+  const persistedFacts = useMemo(() => persistedStepFacts(events), [events]);
   // The harness's plan as a `step_card` widget, from both of the page's sources: `session.get` holds
   // it as it stood when the query ran and the socket holds everything since, so live wins — from
   // the Session on screen only, because `seq` restarts per Session (see `latestStepCard`).
@@ -955,20 +1052,14 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       )
         return event.widget;
     }
-    return latestStepCard(events);
-  }, [events, live.events, liveSessionId]);
+    return persistedStepCard;
+  }, [persistedStepCard, live.events, liveSessionId]);
   /**
    * The decisions the harness emitted, latest per id, from both sources (point 3). They are on
    * the board as nodes, and the gate waits for each to be settled.
    */
   const decisions = useMemo<DecisionWidget[]>(() => {
-    const byId = new Map<string, DecisionWidget>();
-    for (const event of events) {
-      const payload = event.payload;
-      if (payload.kind === "widget" && payload.widget.kind === "decision") {
-        byId.set(payload.widget.id, payload.widget);
-      }
-    }
+    const byId = new Map(persistedDecisions);
     for (const event of live.events) {
       if (
         event.kind === "widget" &&
@@ -979,15 +1070,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       }
     }
     return [...byId.values()];
-  }, [events, live.events, liveSessionId]);
+  }, [persistedDecisions, live.events, liveSessionId]);
   /**
    * What the board files under each Step: its plan, its todo list, its decisions. The workspace's
    * own `stepCard` and `decisions` above are the Session-wide answers the gate needs; this is the
    * same reading split by where it happened.
    */
   const facts = useMemo(
-    () => stepFacts(events, live.events, liveSessionId),
-    [events, live.events, liveSessionId],
+    () => withLiveStepFacts(persistedFacts, live.events, liveSessionId),
+    [persistedFacts, live.events, liveSessionId],
   );
   /**
    * Which Steps finished, and when (`session.stepDecisions`): how the board tells a Step that
@@ -1024,8 +1115,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       )
         return event.widget;
     }
-    return latestCompletion(events);
-  }, [events, live.events, liveSessionId]);
+    return persistedCompletion;
+  }, [persistedCompletion, live.events, liveSessionId]);
   const openItems = useMemo(() => openItemsOf(completion, stepCard), [completion, stepCard]);
   // The count on the Review tab: how many criteria the reviewer has not ticked. The same query
   // the panel makes — React Query hands both the one response.
@@ -1035,7 +1126,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   );
   const briefCriteria = briefQuery.data?.criteria.length ?? null;
 
-  const [input, setInput] = useState("");
   // The decision this page last sent, held until the Task row moves on (see `decisionSent`).
   const [sent, setSent] = useState<{
     sessionId: string;
@@ -1086,14 +1176,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
   });
   /**
-   * Starting the harness, from the same arrow that would otherwise only have written the state.
+   * Starting the harness, from the forward arrow on a Ready Task.
    *
-   * `task.move` into `running` is accepted by the server — the transition is legal — and does
-   * nothing else: no Session is created and no launch is published. The Task page has no Launch
-   * button of its own, so the forward arrow on a Ready Task is the obvious way to begin a run
-   * here, and a bare move would leave a Task that reads as Running with no harness behind it,
-   * holding one of the Harness Profile's concurrency slots and with no way back — `running` has no
-   * legal retreat, and `task.launch` refuses a Task that is no longer Ready.
+   * The Task page has no Launch button of its own, so that arrow is the way to begin a run here.
+   * It calls `task.launch` rather than `task.move`, though a move into `running` now starts a run
+   * too (both reach `startTaskRun`): `task.launch` refuses anything but a Ready Task, which is
+   * the one case this arrow means, and it is the call the Workflow choice in `LaunchTaskDialog`
+   * ends in, so both ways of starting from this page take the same path.
    */
   const launch = trpc.task.launch.useMutation({
     onSuccess: () => {
@@ -1114,6 +1203,23 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       utils.task.get.invalidate({ id: taskId });
       utils.task.list.invalidate();
       utils.session.listForTask.invalidate({ taskId });
+    },
+  });
+  /**
+   * The two ways out of an approval that committed and did not ship (A1). Ship again only hands
+   * the push to the orchestrator, which moves the Task when it lands and announces it, so the
+   * Task is re-read then; Keep local is a state write and answers with the Task.
+   */
+  const shipAgain = trpc.task.redeliver.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
+    },
+  });
+  const keepLocal = trpc.task.keepLocal.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
     },
   });
   /**
@@ -1228,9 +1334,102 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }),
     [draft.setNotes, draft.draft.notes],
   );
+  // One object for as long as the draft holds still, so the memoized Changes panel does too.
+  const ticks = useMemo(
+    () => ({
+      viewed: draft.viewed,
+      onToggle: draft.toggleViewed,
+      notes: draft.draft.notes,
+      ...noteEdits,
+    }),
+    [draft.viewed, draft.toggleViewed, draft.draft.notes, noteEdits],
+  );
   const reviewGroups = useMemo(
     () => groupChanges(capturedDiffs, attachments, nameFor),
     [capturedDiffs, attachments, nameFor],
+  );
+
+  /*
+   * The board's inputs, above the guards so they can be memoized.
+   *
+   * The board turns them into React Flow nodes, and it rebuilds every node — and redraws every
+   * card — whenever `columns` or one of its callbacks is a new value. Built inline below the
+   * guards, all of them were new on every render of this page: each keystroke in the
+   * request-changes note, each dialog opening, the terminal pane toggling. Now the nodes change
+   * when something they draw does.
+   */
+  const shown = task.data;
+  const taskState = shown?.state ?? null;
+  /**
+   * The gate's footer — Approve, Retry, Launch, Open review — said once on the page: in the gate
+   * dialog, which the gate card on the board and the strip under the brief and the change both
+   * open. One copy, so there is one control of each name on the page and one remark box bound to
+   * the draft. It never points at a question the harness is stopped on (`waiting`): that question
+   * is a card on the board, answered from its own dialog.
+   */
+  const gateShown =
+    shown !== undefined &&
+    deleted === null &&
+    (shown.state !== "running" || canOpenReview(shown) || shown.completedAt !== null);
+  const columns = useMemo(
+    () =>
+      taskState === null
+        ? NO_COLUMNS
+        : boardColumns({
+            stepped: scope.stepped,
+            state: taskState,
+            home: scope.selected,
+            facts,
+            rows,
+            showGate: gateShown,
+            history: stepHistory,
+          }),
+    [taskState, scope.stepped, scope.selected, facts, rows, gateShown, stepHistory],
+  );
+  /**
+   * What Follow live pans to: the newest thing waiting on a person, else the newest card under
+   * the Step the run is on. A todo ticking is not news; a question arriving is.
+   */
+  const latestKey = useMemo(() => {
+    if (taskState === null) return null;
+    const asks = columns.flatMap((column) => column.items).filter((i) => needsYou(i, taskState));
+    return asks.at(-1)?.key ?? columns.find((column) => column.current)?.items.at(-1)?.key ?? null;
+  }, [columns, taskState]);
+  const outstandingCount = dependencies.outstanding.length;
+  const lines = useMemo(
+    () =>
+      shown === undefined
+        ? NO_GATE_LINES
+        : gateLines(shown, {
+            decisionsPending,
+            openItems: openItems.length,
+            files: fileCount,
+            outstanding: outstandingCount,
+          }),
+    [shown, decisionsPending, openItems.length, fileCount, outstandingCount],
+  );
+  const answers = draft.draft.decisions;
+  const renderItem = useCallback(
+    (item: BoardItem, column: BoardColumn) =>
+      taskState === null
+        ? null
+        : renderBoardItem(item, column, {
+            state: taskState,
+            fresh: (key) => key === latestKey && isRunning,
+            answerable: isRunning,
+            answers,
+            confirming: taskState === "review" && deleted === null,
+            gateDecisionIds,
+            gate: lines,
+            open: (key) => setOpened({ type: "item", key }),
+          }),
+    [taskState, latestKey, isRunning, answers, deleted, gateDecisionIds, lines],
+  );
+  const openStep = useCallback((id: string) => setOpened({ type: "step", id }), []);
+  const { mutate: forceStepReviewMutate } = forceReview;
+  const forceStepReview = useCallback(
+    (stepId: string, force: boolean) => forceStepReviewMutate({ taskId, stepId, force }),
+    [forceStepReviewMutate, taskId],
   );
 
   if (task.isLoading) {
@@ -1248,9 +1447,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         <p className="text-muted-foreground text-sm">
           It may have been deleted, or the link may be stale.
         </p>
+        {/* Not a fixed `/board`: no such route exists any more (boards live under a Project),
+            so that link led to a 404. With no Task loaded there is no Project to name, and
+            `back` resolves to the Projects list. */}
         <Button asChild variant="outline" size="sm">
-          <Link href="/board">
-            <ArrowLeft /> Back to the board
+          <Link href={back.href}>
+            <ArrowLeft /> {back.label}
           </Link>
         </Button>
       </div>
@@ -1268,8 +1470,16 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   // The gate's scope is always the latest capture; the tab may be showing an older round.
   const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
-  // The board, whatever the state: the gate is a node on it (see `TaskBoard`).
-  const autoTab: WorkspaceTab = "board";
+  // The board, except a Task found waiting at its gate on arrival, which opens on its Changes,
+  // where the footer's Approve / Request changes already sit (E7). A pick still wins until the
+  // state moves.
+  if (landedAtGate.current?.taskId !== t.id) {
+    landedAtGate.current = { taskId: t.id, atGate: t.state === "review" };
+  } else if (t.state !== "review") {
+    landedAtGate.current.atGate = false;
+  }
+  const autoTab: WorkspaceTab =
+    landedAtGate.current.atGate && t.state === "review" ? "changes" : "steps";
   // A pick from the URL has no state yet: it holds until the first state change after arrival.
   const tab =
     tabPick && (tabPick.state === null || tabPick.state === t.state) ? tabPick.tab : autoTab;
@@ -1277,15 +1487,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     setTabPick({ tab: next, state: t.state });
     setUrlTab(next);
   };
-  /**
-   * The gate's footer — Approve, Retry, Launch, Open review — said once on the page: in the gate
-   * dialog, which the gate card on the board and the strip under the brief and the change both
-   * open. One copy, so there is one control of each name on the page and one remark box bound to
-   * the draft. It never points at a question the harness is stopped on (`waiting`): that question
-   * is a card on the board, answered from its own dialog.
-   */
-  const gateShown =
-    deleted === null && (t.state !== "running" || canOpenReview(t) || t.completedAt !== null);
   const renderFooter = () =>
     deleted !== null ? null : (
       <TaskFooter
@@ -1317,9 +1518,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         onDismissError={() => {
           retry.reset();
           decide.reset();
+          shipAgain.reset();
+          keepLocal.reset();
         }}
         onLaunch={() => requestMove("running")}
         onRetry={() => retry.mutate({ id: t.id })}
+        onShipAgain={() => shipAgain.mutate({ id: t.id })}
+        onKeepLocal={() => keepLocal.mutate({ id: t.id })}
         onOpenReview={() => submitForReview.mutate({ id: t.id })}
         onReopen={() => requestMove("ready")}
         nextStepName={nextStepName}
@@ -1337,21 +1542,18 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           pickTab("brief");
         }}
         openReviewPending={submitForReview.isPending}
-        actionPending={move.isPending || launch.isPending || retry.isPending}
+        actionPending={
+          move.isPending ||
+          launch.isPending ||
+          retry.isPending ||
+          shipAgain.isPending ||
+          keepLocal.isPending
+        }
         renewHref={renewHref}
         error={footerMessage}
       />
     );
 
-  const columns = boardColumns({
-    stepped: scope.stepped,
-    state: t.state,
-    home: scope.selected,
-    facts,
-    rows,
-    showGate: gateShown,
-    history: stepHistory,
-  });
   const tally = boardTally(columns);
   const everyItem = columns.flatMap((column) => column.items);
   const openAsks = everyItem.filter((item) => needsYou(item, t.state));
@@ -1359,21 +1561,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * What Follow live pans to: the newest thing waiting on a person, else the newest card under
    * the Step the run is on. A todo ticking is not news; a question arriving is.
    */
-  const currentColumn = columns.find((column) => column.current);
-  const latestKey = openAsks.at(-1)?.key ?? currentColumn?.items.at(-1)?.key ?? null;
   const gateItem = everyItem.find((item) => item.kind === "gate");
   // The Step an approval hands on to — what "Approve" says it will do. Null on the last Step, and
   // on a Task with no Workflow, where approving finishes the Task.
   const gateAt = columns.findIndex((c) => c.items.some((i) => i.kind === "gate"));
   const nextStepName = scope.stepped.length > 0 ? (columns[gateAt + 1]?.name ?? null) : null;
   const gateColumn = columns.find((column) => column.items.some((item) => item.kind === "gate"));
-  const lines = gateLines(t, {
-    decisionsPending,
-    openItems: openItems.length,
-    files: fileCount,
-    outstanding: dependencies.outstanding.length,
-  });
-
   /**
    * Approve pressed with decisions still unsettled: rather than a greyed button and a sentence
    * about somewhere else, the dialog of the Step's decisions opens in place of the gate's, with
@@ -1404,7 +1597,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   };
   const revealOnBoard = (item: BoardItem | undefined) => {
     if (!item) return;
-    pickTab("board");
+    pickTab("steps");
     requestAnimationFrame(() => board.current?.reveal(item.key));
   };
   const openGate = () => {
@@ -1680,7 +1873,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   };
   // Refusals from the foot of the page, through the same mapping as the banner above: a wire
   // code is never the sentence an operator reads.
-  const footerMessage = taskActionMessage(retry.error?.message ?? decide.error?.message);
+  const footerMessage = taskActionMessage(
+    retry.error?.message ??
+      decide.error?.message ??
+      shipAgain.error?.message ??
+      keepLocal.error?.message,
+  );
 
   /**
    * One step along the lifecycle, from the arrows beside the state badge.
@@ -1708,17 +1906,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // `taskActionMessage` owns the whole mapping, the same one the board's banner reads through.
   const moveMessage = taskActionMessage(move.error?.message ?? launch.error?.message);
 
-  const submitInput = () => {
-    const text = input.trim();
-    if (!text || !isRunning) return;
+  /** Whether the steer was taken — sent, or held for the stream — so the composer can clear. */
+  const submitInput = (raw: string): boolean => {
+    const text = raw.trim();
+    if (!text || !isRunning) return false;
     setAck(null);
     // Straight through when there is a stream to send on; held for it otherwise.
-    if (canSteer && live.sendInput(text)) {
-      setInput("");
-      return;
-    }
+    if (canSteer && live.sendInput(text)) return true;
     setQueued(text);
-    setInput("");
+    return true;
   };
 
   return (
@@ -1817,6 +2013,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 trigger={(press, busy) => (
                   <Button
                     aria-label={`Delete ${t.title}`}
+                    // Where the delete will land — `back` changes once the Task's Project is
+                    // known, and the end-to-end checks wait on it rather than on the network.
+                    data-after-delete={back.href}
                     className="text-muted-foreground hover:text-destructive"
                     onClick={press}
                     loading={busy}
@@ -2028,6 +2227,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               </div>
             ) : null}
 
+            {viewing?.eventsPrunedAt ? (
+              <TranscriptPrunedNotice at={viewing.eventsPrunedAt} />
+            ) : null}
+
             {moveMessage ? (
               /*
             A refusal, in the feedback family (not the lifecycle one — Failed red is the Task's
@@ -2069,11 +2272,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 where none of them is anyone's to do.
               */}
                 <TabsTrigger
-                  value="board"
+                  value="steps"
                   count={t.state === "review" ? decisionsPending : 0}
                   countLabel="decisions still to settle"
                 >
-                  Board
+                  Steps
                 </TabsTrigger>
                 <TabsTrigger
                   value="brief"
@@ -2096,7 +2299,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               </TabsList>
 
               {/* All three stay mounted: the board holds its viewport, the Changes panel its file. */}
-              <TabsContent value="board" keepMounted className="flex min-h-0 flex-col">
+              <TabsContent value="steps" keepMounted className="flex min-h-0 flex-col">
                 {/*
                   The board is what the Workflow strip's tabs scope — the cards are read for the
                   Step picked — so it is that strip's panel as well as this tab's.
@@ -2104,31 +2307,17 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 <div ref={boardPanel} tabIndex={-1} className="min-h-0 flex-1 outline-none">
                   <TaskBoard
                     handle={board}
-                    label={`Board for ${t.title}`}
+                    label={`Steps of ${t.title}`}
                     columns={columns}
                     state={t.state}
                     live={isRunning && live.status === "open"}
                     latestKey={latestKey}
-                    onOpenStep={(id) => setOpened({ type: "step", id })}
+                    onOpenStep={openStep}
                     forcedReview={forcedReview}
                     {...(scope.binding && deleted === null
-                      ? {
-                          onForceReview: (stepId: string, force: boolean) =>
-                            forceReview.mutate({ taskId, stepId, force }),
-                        }
+                      ? { onForceReview: forceStepReview }
                       : {})}
-                    renderItem={(item, column) =>
-                      renderBoardItem(item, column, {
-                        state: t.state,
-                        fresh: (key) => key === latestKey && isRunning,
-                        answerable: isRunning,
-                        answers: draft.draft.decisions,
-                        confirming: t.state === "review" && deleted === null,
-                        gateDecisionIds,
-                        gate: lines,
-                        open: (key) => setOpened({ type: "item", key }),
-                      })
-                    }
+                    renderItem={renderItem}
                   />
                 </div>
                 {/*
@@ -2137,10 +2326,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   process and cannot.
                 */}
                 {isRunning || queued !== null || stopQueued ? (
-                  <HarnessComposer
-                    value={input}
-                    onChange={setInput}
-                    onSubmit={submitInput}
+                  <SteerComposer
+                    onSend={submitInput}
                     onStop={() => {
                       setAck(null);
                       live.stopHarness();
@@ -2214,14 +2401,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     // still Running, is read, not reviewed.
                     {...(t.state === "review" &&
                     (shownRound === null || shownRound.index === latestRound)
-                      ? {
-                          ticks: {
-                            viewed: draft.viewed,
-                            onToggle: draft.toggleViewed,
-                            notes: draft.draft.notes,
-                            ...noteEdits,
-                          },
-                        }
+                      ? { ticks }
                       : {})}
                   />
                 </ReadingPanel>

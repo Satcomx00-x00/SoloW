@@ -17,7 +17,7 @@ re-specifying configuration each time.
 
 ## User stories
 
-- As a Team Lead, I want to define standard harness configurations once, so my team uses them
+- *(Later — team use.)* As a Team Lead, I want to define standard harness configurations once, so my team uses them
   consistently.
 - As a user, I want to pick a harness and a runtime for a Task from saved options, so I do
   not reconfigure everything each time.

@@ -477,7 +477,7 @@ function Board({
         <MiniMap<ColumnNode>
           pannable
           zoomable
-          ariaLabel="Board overview"
+          ariaLabel="Steps overview"
           nodeColor={(node) =>
             node.data.attention
               ? "var(--state-review)"

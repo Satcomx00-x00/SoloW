@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --bun next dev --port 5000",
+    "dev": "bun --bun next dev --port 5000 --hostname 127.0.0.1",
     "build": "bun --bun next build",
-    "start": "bun --bun next start --port 5000",
+    "start": "bun --bun next start --port 5000 --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun run ../../scripts/test-batches.ts",
     "lint": "biome check .",
     "openapi:gen": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts",
     "openapi:check": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts --check"
@@ -35,7 +35,7 @@
     "fflate": "0.8.3",
     "geist": "^1.7.2",
     "lucide-react": "^1.31.0",
-    "next": "^15",
+    "next": "^15.5.27",
     "radix-ui": "^1.6.7",
     "react": "^19",
     "react-dom": "^19",

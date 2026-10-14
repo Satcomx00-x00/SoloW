@@ -74,6 +74,13 @@ const WITHHELD_NAMESPACES = new Set([
   // below: a Step names library items by id, so a builder has to be able to read the ids — and
   // a listing carries commands, URLs and Secret *references*, never a Secret's value.
   "library",
+  // `outcomes` — spend, cycle times and every Task's title across the Workspace. Reporting for a
+  // person, not work management; a read token held by one harness has no use for the others'.
+  "outcomes",
+  // `setup` — the guided setup (roadmap E1). `connectClaude` stores a credential, which is the
+  // `secret` reasoning above with a Profile attached; `test` spends the Owner's tokens on a prompt.
+  // Neither is work management, and both are a person's first-party act.
+  "setup",
 ]);
 
 /** Withheld one procedure at a time, inside a namespace that is otherwise exposed. */
@@ -89,6 +96,18 @@ const WITHHELD_PROCEDURES = new Set([
   "profile.harnessConfig.duplicate",
   "profile.harnessConfig.delete",
   "profile.harnessConfig.import",
+  // The transcript window is how long the evidence of a run survives: a token shortening it is
+  // the subject erasing its own evidence, the `history` reasoning above. The preview goes with
+  // it — it sizes every finished transcript, and only the Settings screen needs the answer.
+  "workspace.setHistoryRetention",
+  "workspace.previewHistoryRetention",
+  // Ship again and Keep local both end an approved, undelivered Task as Done. A harness must not
+  // mark its own Task finished; that is a person's call after the approval, like the approval.
+  "task.redeliver",
+  "task.keepLocal",
+  // Empties the Workspace, with no undo. The typed name is no protection against a client that
+  // can read the name through `workspace.get`.
+  "workspace.reset",
 ]);
 
 /** Exposed one procedure at a time, inside a namespace that is otherwise withheld. */
@@ -155,8 +174,22 @@ function describe(procedurePath: string, type: string, meta: ProcedureDef["_def"
   return written ?? `${verb} operation \`${procedurePath}\` on SoloW.`;
 }
 
+/**
+ * Built once per process. `appRouter` and the exposure lists are fixed at import, so the answer
+ * never changes — and building it is not free: one zod-to-JSON-Schema conversion per exposed
+ * procedure, then a sort. It used to run on every `tools/list`, and on every `tools/call` just to
+ * find the one tool asked for.
+ */
+let tools: readonly McpToolDefinition[] | undefined;
+let toolsByName: ReadonlyMap<string, McpToolDefinition> | undefined;
+
 /** Every procedure the MCP surface exposes, in stable path order. */
-export function listMcpTools(): McpToolDefinition[] {
+export function listMcpTools(): readonly McpToolDefinition[] {
+  tools ??= buildMcpTools();
+  return tools;
+}
+
+function buildMcpTools(): McpToolDefinition[] {
   const procedures = (
     appRouter as unknown as { _def: { procedures: Record<string, ProcedureDef> } }
   )._def.procedures;
@@ -176,5 +209,6 @@ export function listMcpTools(): McpToolDefinition[] {
 
 /** Look up one tool by its MCP name; undefined when the client asked for something withheld. */
 export function findMcpTool(name: string): McpToolDefinition | undefined {
-  return listMcpTools().find((tool) => tool.name === name);
+  toolsByName ??= new Map(listMcpTools().map((tool) => [tool.name, tool]));
+  return toolsByName.get(name);
 }

@@ -93,6 +93,12 @@ export const sessionDto = z.object({
   diffRef: z.string().nullable(),
   startedAt: z.string().datetime(),
   endedAt: z.string().datetime().nullable(),
+  /**
+   * When the retention sweep removed this Session's transcript (Decision 0032), or null while it
+   * has one. What lets the terminal say "removed" instead of drawing a run that said nothing.
+   * Optional as well as nullable, so a fixture built before the field still describes a Session.
+   */
+  eventsPrunedAt: z.string().datetime().nullable().optional(),
 });
 export type SessionDto = z.infer<typeof sessionDto>;
 
@@ -454,7 +460,9 @@ export type SessionEventDto = z.infer<typeof sessionEventDto>;
  * Compaction inserts one of these and stops. It never deletes and never mutates: the events the
  * range covers are still there, still replayable, still the evidence the review gate kept
  * (Principle I). A summary is an index into the log, not a replacement for it — which is why
- * the UI's collapsed range can always be expanded back into the events themselves.
+ * the UI's collapsed range can always be expanded back into the events themselves — until history
+ * retention (Decision 0032) removes a finished Task's transcript, after which the summary is what
+ * is left of the range.
  */
 export const sessionSummaryDto = z.object({
   id: idSchema,

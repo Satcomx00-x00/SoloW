@@ -1,15 +1,40 @@
+import { DEFAULT_EXECUTOR_IMAGE } from "@solow/contracts";
 import { z } from "zod";
 
 /** Validated orchestrator env (no bare process.env). */
 const schema = z.object({
   SOLOW_WS_PORT: z.coerce.number().int().default(5001),
+  /**
+   * Interface the orchestrator listens on. Loopback unless a deployment names otherwise: the
+   * hub, `/events` and the terminal socket are the keys to every Task's working copy, so reaching
+   * them from the network is a choice made on purpose (`SOLOW_BIND_HOST=0.0.0.0`), never a side
+   * effect of leaving something unset.
+   */
+  SOLOW_BIND_HOST: z.string().min(1).default("127.0.0.1"),
   SOLOW_WORKTREE_ROOT: z.string().min(1).default(".solow/worktrees"),
   SOLOW_REPO_CACHE_ROOT: z.string().min(1).default(".solow/repos"),
+  /**
+   * Where the SQLite database is, read here (as `@solow/db` does, same default) only so the
+   * container driver can refuse to mount the directory it and the keys beside it live in. Not
+   * `dbEnv()`, which also demands the secret key.
+   */
+  SOLOW_DB_DRIVER: z.enum(["sqlite", "postgres"]).default("sqlite"),
+  SOLOW_SQLITE_PATH: z.string().min(1).default(".solow/solow.db"),
+  /** The CLI's data directory (default `~/.solow`), protected from mounts for the same reason. */
+  SOLOW_HOME: z.string().min(1).optional(),
   /**
    * HMAC key for stream subscription tickets (TASK-018) — the same value the web app signs
    * with. Required: without it the hub could not authenticate a subscriber at all.
    */
   SOLOW_STREAM_SECRET: z.string().min(1),
+  /**
+   * Bearer secret the web app presents on `POST /events` (FINDINGS B3). Read raw: its rule is
+   * `readOrchestratorSecret` in `@solow/contracts`, shared with the web app and applied by
+   * `handleEventPost`, so a missing or short value refuses that route with a 503 rather than
+   * failing this parse and with it the whole server. The launchers generate one into
+   * `.solow/orchestrator.secret`.
+   */
+  SOLOW_ORCHESTRATOR_SECRET: z.string().optional(),
   /**
    * What an ACP permission nobody answered decays to (issue #58, AC-4). Refusal unless a
    * deployment names the permissive posture — a deployment can widen its own posture on
@@ -32,6 +57,13 @@ const schema = z.object({
    */
   SOLOW_DOCKER_PULL_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   /**
+   * The image the guided setup gives a new container executor (roadmap B4): one that carries the
+   * harnesses, since the driver spawns the bare command inside it. The default is the tag
+   * `make executor-image` builds; naming another here is how an operator who keeps their own
+   * harness image makes it the isolated default instead. Only offered once the daemon has it.
+   */
+  SOLOW_EXECUTOR_IMAGE: z.string().min(1).default(DEFAULT_EXECUTOR_IMAGE),
+  /**
    * `uid:gid` for the processes inside the container, overriding the orchestrator's own
    * `getuid()`/`getgid()`. Numeric on purpose: a username would be resolved against the
    * *image's* `/etc/passwd`, while the entire reason the flag is passed is that files the harness
@@ -43,6 +75,14 @@ const schema = z.object({
     .string()
     .regex(/^\d+:\d+$/, "SOLOW_DOCKER_USER must be a numeric uid:gid pair, e.g. 1000:1000")
     .optional(),
+  /**
+   * Where the durable engine is, read only so `GET /health` can say whether it answers (FINDINGS
+   * F3). These are the Inngest SDK's own variables, which it reads itself to decide where events
+   * go; the health probe asks the same address rather than a second, `SOLOW_`-named one. Raw
+   * strings: `INNGEST_DEV` is either a flag or a Dev Server URL, and the SDK decides which.
+   */
+  INNGEST_BASE_URL: z.string().optional(),
+  INNGEST_DEV: z.string().optional(),
 });
 export type OrchestratorEnv = z.infer<typeof schema>;
 let cached: OrchestratorEnv | undefined;

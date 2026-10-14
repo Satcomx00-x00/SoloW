@@ -1,6 +1,6 @@
 "use client";
 
-import type { WorkflowStepGate, WorkflowWithStepsDto } from "@solow/contracts";
+import type { WorkflowWithStepsDto } from "@solow/contracts";
 import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -11,9 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
-import { taskActionMessage } from "@/lib/task-errors";
 import { nextStepName, stepDotColors } from "@/lib/workflow-canvas";
+import { effectiveGate, GATE_NAME } from "@/lib/workflow-gates";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -29,14 +30,6 @@ import { trpc } from "@/trpc/react";
  * harness and prompt into this panel would undo exactly what the node graph is for. The outline
  * navigates to a Step; it does not become a second place to edit one.
  */
-// The canvas's "Wait for review" button, said in the outline in its own words.
-const GATE_SUMMARY: Record<WorkflowStepGate, string> = {
-  human: "waits for review",
-  auto: "moves on by itself",
-  "auto-unless-changes": "waits if it changed files",
-  "agent-decides": "the AI decides on review",
-};
-
 /**
  * Reveal a Step on the canvas and put the caret in its name.
  *
@@ -91,7 +84,7 @@ function Outline({ workflow }: { workflow: WorkflowWithStepsDto }) {
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm">{step.name}</span>
                 <span className="block truncate text-2xs text-muted-foreground">
-                  {nameOf(step.agentProfileId)} · {GATE_SUMMARY[step.gate]}
+                  {nameOf(step.agentProfileId)} · {GATE_NAME[effectiveGate(step)]}
                 </span>
                 {step.branch && (
                   <span className="block truncate text-2xs text-muted-foreground">
@@ -135,8 +128,8 @@ function Outline({ workflow }: { workflow: WorkflowWithStepsDto }) {
         </p>
       )}
       {add.error && (
-        <p className="px-2 font-mono text-2xs text-state-failed" role="alert">
-          {add.error.message}
+        <p className="px-2 text-2xs text-state-failed" role="alert">
+          {describeError(add.error)}
         </p>
       )}
     </div>
@@ -241,7 +234,7 @@ function Properties({ workflow }: { workflow: WorkflowWithStepsDto }) {
       />
       {(rename.error || remove.error) && (
         <p className="font-mono text-2xs text-state-failed" role="alert">
-          {taskActionMessage((rename.error ?? remove.error)?.message)}
+          {describeError(rename.error ?? remove.error)}
         </p>
       )}
     </div>

@@ -123,3 +123,22 @@ empty range and cuts nothing. Main's tip stays verified, which `[skip ci]` would
   carry a version that nothing reads.
 - **Prereleases.** `next-version.ts` throws on a version carrying a `-rc.1` or build suffix rather
   than guessing at it. Adding a prerelease channel is a decision of its own.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds as a mechanism; it now sits awkwardly with the weekly cadence.**
+
+- `.github/workflows/release.yml` runs after every green Verify on a push to main and releases
+  whatever version the commits ask for (`packages/cli/scripts/next-version.ts`). It is gated on
+  the whole Verify run, including the control check, so a red main cannot ship.
+- [0031](./0031-focus-on-the-solo-power-user.md) and the [Conventions](../CONVENTIONS.md) ask
+  for one release a week, not one per merge. Nothing in the workflow enforces that: any `feat`
+  or `fix` merged to main is released the same day. The weekly cadence currently depends on
+  merging to main weekly. Either the workflow gains a schedule, or the convention says plainly
+  that main is merged to once a week.
+- Resolved the same day: `release.yml` now runs on a Monday schedule (and on dispatch) instead
+  of after every Verify run. It releases main's tip only when a push-to-main Verify run finished
+  green on that exact commit, and otherwise stands down until the next run.

@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
+import { trpc } from "@/trpc/react";
 
 /**
  * The Workflows page's own header controls: the three ways a pipeline comes into being, which
@@ -55,6 +56,41 @@ describe("WorkflowCreateActions", () => {
     });
   });
 
+  it("lists the new workflow even when the list's first read was still in flight", async () => {
+    // Create pressed moments after the page opened (the control check does exactly this): the
+    // list's first read began before the write, so it answers without the new pipeline — and the
+    // canvas, which picks its Workflow out of the list, opened on "No workflows yet".
+    const created = { id: "wf-new", name: "Plan, build, review", stepCount: 0 };
+    let reads = 0;
+    function ListedNames() {
+      const list = trpc.workflow.list.useQuery({});
+      return <p data-testid="listed">{(list.data ?? []).map((w) => w.name).join(",")}</p>;
+    }
+    renderWithTrpc(
+      <>
+        <ListedNames />
+        <WorkflowCreateActions installed={[]} />
+      </>,
+      {
+        "workflow.list": () =>
+          reads++ === 0 ? new Promise((resolve) => setTimeout(() => resolve([]), 300)) : [created],
+        "workflow.create": () => created,
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "New workflow" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Workflow name" }), {
+      target: { value: created.name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(screen.getByTestId("listed").textContent).toBe(created.name));
+    // And the stale first answer, landing afterwards, does not take it away again.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.getByTestId("listed").textContent).toBe(created.name);
+    expect(pushed).toEqual(["/workflows/wf-new"]);
+  });
+
   it("will not create a workflow with no name", async () => {
     renderWithTrpc(<WorkflowCreateActions installed={[]} />, {});
 
@@ -68,7 +104,7 @@ describe("WorkflowCreateActions", () => {
   it("says why when the server refuses the name", async () => {
     renderWithTrpc(<WorkflowCreateActions installed={[]} />, {
       "workflow.create": () => {
-        throw new Error("A workflow with that name already exists");
+        throw new Error("VALIDATION_FAILED");
       },
     });
 
@@ -78,7 +114,9 @@ describe("WorkflowCreateActions", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("already exists");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Check the fields");
+    expect(alert.textContent).not.toContain("VALIDATION_FAILED");
     expect(pushed).toEqual([]);
   });
 });

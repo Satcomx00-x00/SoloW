@@ -145,7 +145,9 @@ describe("HarnessProfilesSection", () => {
       name: "Delete the harness profile Unused profile",
     });
     expect(trigger.hasAttribute("disabled")).toBe(false);
-    expect(screen.queryByText(/Used by/)).toBeNull();
+    // The row's own line ("Used by 3 tasks"), not the form's help text ("Used by a task running
+    // on no workflow…"), which a bare /Used by/ also matched.
+    expect(screen.queryByText(/^Used by \d/)).toBeNull();
   });
 
   it("surfaces a delete failure to the Owner instead of failing silently", async () => {
@@ -177,7 +179,10 @@ describe("HarnessProfilesSection", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("AGENT_PROFILE_IN_USE");
+      // The plain sentence, never the wire code (E6).
+      expect(screen.getByRole("alert").textContent).toContain(
+        "A task or a workflow step still uses this harness profile.",
+      );
     });
   });
 });
@@ -195,8 +200,11 @@ describe("HarnessProfilesSection — harness catalog", () => {
       "profile.agent.list": () => ({ items: [], nextCursor: null }),
     });
 
-    await screen.findByText("Add a custom harness");
-    expect(screen.queryByLabelText("Command")).toBeNull();
+    // A closed `<details>`: its fields are in the DOM, just not shown, so "collapsed" is the
+    // disclosure's own state. (Asserting the Command field `toBeNull()` here passed by accident —
+    // Bun spent 80 s and gigabytes printing the element for a failure it never reported.)
+    const summary = await screen.findByText("Add a custom harness");
+    expect(summary.closest("details")?.open).toBe(false);
   });
 
   it("declares a new catalog entry with the fields that matter for billing integrity", async () => {
@@ -283,7 +291,9 @@ describe("HarnessProfilesSection — harness catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add to catalog" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("AGENT_CATALOG_KEY_TAKEN");
+      expect(screen.getByRole("alert").textContent).toContain(
+        "A harness with that key already exists.",
+      );
     });
   });
 });

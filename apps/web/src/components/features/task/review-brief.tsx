@@ -24,7 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { relativeAge } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
-import { HarnessMarkdown } from "./markdown";
+import { HarnessMarkdown } from "./lazy-markdown";
 
 /**
  * The Brief tab (review analysis, point 1): the one view that answers "may I sign this".

@@ -5,6 +5,7 @@ import type { TaskEvent } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
+import { trpc } from "@/trpc/react";
 import { useWorkspaceEvents, WorkspaceEventsProvider } from "./workspace-events";
 
 /**
@@ -144,6 +145,34 @@ describe("WorkspaceEventsProvider", () => {
     await waitFor(() => expect(screen.getByTestId("a").textContent).toBe("1"));
     // A surface unmounting is not a reconnect: the connection belongs to the shell, not to it.
     expect(sockets).toHaveLength(1);
+  });
+
+  it("re-reads what is on screen after a reconnect, and not on the first open", async () => {
+    // The channel replays nothing: whatever changed while the socket was down reached no one.
+    ({ sockets, restore } = installFakeWebSocket());
+    function Reader() {
+      trpc.task.list.useQuery({});
+      return null;
+    }
+    const { log } = renderWithTrpc(
+      <WorkspaceEventsProvider>
+        <Reader />
+      </WorkspaceEventsProvider>,
+      { ...ticket, "task.list": () => ({ items: [], nextCursor: null }) },
+    );
+    const reads = () => log.calls.filter((call) => call.path === "task.list").length;
+
+    await waitFor(() => expect(sockets.length).toBe(1));
+    await waitFor(() => expect(reads()).toBe(1));
+    // Opening the first time is not a reason to read again: the page has only just read.
+    await Bun.sleep(50);
+    expect(reads()).toBe(1);
+
+    act(() => {
+      sockets[0]?.drop();
+    });
+    await waitFor(() => expect(sockets.length).toBe(2), { timeout: 5_000 });
+    await waitFor(() => expect(reads()).toBe(2));
   });
 
   it("renders without a provider rather than throwing", () => {

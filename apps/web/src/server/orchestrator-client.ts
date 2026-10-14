@@ -1,16 +1,23 @@
 import "server-only";
 import {
+  type DockerAvailabilityReport,
+  dockerAvailabilityReport,
+  type ExecutorImageBuildStatus,
+  executorImageBuildStatus,
   type HarnessExplainReport,
   type HarnessProbeReport,
   harnessExplainReport,
   harnessProbeReport,
+  orchestratorHealthReport,
   REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
+  type SystemHealthDto,
   TASK_PURGE_REQUESTED,
+  TASK_REDELIVER_REQUESTED,
   type TaskState,
 } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
-import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
+import { devOwnerMode, orchestratorSecret, orchestratorUrl, webEnv } from "./env.js";
 
 /**
  * Thin client the API uses to hand work to the orchestrator service (Decision 0002).
@@ -50,12 +57,21 @@ export interface OrchestratorClient {
     review: { id: string; decision: ReviewDecision; feedback: string | null };
   }): Promise<void>;
   /**
+   * Ship again (A1): push a Task's committed result branches and open or find their requests,
+   * without running anything. Thrown when nothing could do it, so the button says so instead of
+   * looking like it worked.
+   */
+  redeliverTask(input: { workspaceId: string; taskId: string }): Promise<void>;
+  /**
    * Tell every client watching that a Task changed, for a change this API made itself.
    *
    * The hub runs in the orchestrator process, so a state change made by a person reached only
    * the browser that made it — every other open board sat stale until someone reloaded. Fire and
    * forget, and deliberately never fatal: the write already succeeded, and a failed notification
    * must not turn a completed action into an error. The worst case is the old behaviour.
+   *
+   * Never rejects, which is what lets callers `void` it rather than await it: the response to
+   * the move does not wait on a hub that is slow, and its `fetch` has no timeout of its own.
    */
   announceTask(input: { workspaceId: string; taskId: string; state: TaskState }): Promise<void>;
   /**
@@ -97,7 +113,29 @@ export interface OrchestratorClient {
   probeHarnessProfile(input: {
     workspaceId: string;
     agentProfileId: string;
+    /** Follow a passing probe with one real prompt — see `harnessProbeRequest.turn`. */
+    turn?: boolean;
+    /** Probe where this Executor Profile's Tasks run — see `harnessProbeRequest.executorProfileId`. */
+    executorProfileId?: string;
   }): Promise<HarnessProbeReport>;
+  /**
+   * Whether the orchestrator answers, and whether the engine behind it does (FINDINGS F3).
+   *
+   * Resolves whatever happens — the answer *is* the report, and a status bar that threw on an
+   * outage would go blank in exactly the moment it exists for.
+   */
+  health(): Promise<SystemHealthDto>;
+  /** Whether the orchestrator's host has a reachable Docker daemon (roadmap B4). */
+  dockerAvailability(input: { workspaceId: string }): Promise<DockerAvailabilityReport | null>;
+  /**
+   * Where the orchestrator's build of the executor image is (roadmap B4) — or, with `start`, start
+   * one first, unless one is running already. Null when the orchestrator could not be asked: an
+   * unanswered question is not a build that failed, and the screen says which it was.
+   */
+  executorImageBuild(input: {
+    workspaceId: string;
+    start: boolean;
+  }): Promise<ExecutorImageBuildStatus | null>;
   /** Ask the Task's own harness for one answer — the Brief tab's Explain (see dal/explain-criterion.ts). */
   explainWithHarness(input: {
     workspaceId: string;
@@ -109,11 +147,20 @@ export interface OrchestratorClient {
 
 const UNWIRED = "orchestrator not configured (SOLOW_ORCHESTRATOR_URL unset)";
 
+/**
+ * How long the health read waits for the orchestrator. Longer than its own two-second engine
+ * probe, so a slow engine is reported as the engine's problem rather than the orchestrator's.
+ */
+const HEALTH_TIMEOUT_MS = 3_000;
+
 async function emit(name: string, data: unknown): Promise<void> {
   const base = orchestratorUrl();
   const res = await fetch(new URL("/events", base), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(orchestratorSecret() ? { authorization: `Bearer ${orchestratorSecret()}` } : {}),
+    },
     body: JSON.stringify({ name, data }),
   });
   if (!res.ok) {
@@ -149,6 +196,11 @@ export const orchestrator: OrchestratorClient = {
     throw new Error(`${UNWIRED}: a review decision needs a run to apply it`);
   },
 
+  async redeliverTask(input) {
+    if (orchestratorUrl()) return emit(TASK_REDELIVER_REQUESTED, input);
+    throw new Error(`${UNWIRED}: shipping a branch needs the orchestrator`);
+  },
+
   async requestMirrorSync(input) {
     if (orchestratorUrl()) return emit(REPOSITORY_SYNC_REQUESTED, input);
     // Silent in dev without an orchestrator, like `announceTask`: there is no poll to hurry, and
@@ -163,11 +215,13 @@ export const orchestrator: OrchestratorClient = {
   },
 
   async announceTask(input) {
-    const base = orchestratorUrl();
-    // Silent where there is no hub to tell: a dev run without an orchestrator is not a broken
-    // deployment, and logging a line per state change would drown the console it shares.
-    if (!base) return;
     try {
+      // Inside the `try`: a malformed SOLOW_ORCHESTRATOR_URL throws from the parse, and nothing
+      // awaits this to catch it.
+      const base = orchestratorUrl();
+      // Silent where there is no hub to tell: a dev run without an orchestrator is not a broken
+      // deployment, and logging a line per state change would drown the console it shares.
+      if (!base) return;
       const ticket = signStreamTicket(
         { workspaceId: input.workspaceId, taskId: input.taskId },
         webEnv().SOLOW_STREAM_SECRET,
@@ -208,6 +262,103 @@ export const orchestrator: OrchestratorClient = {
     }
     return harnessExplainReport.parse(await res.json());
   },
+  async health() {
+    const checkedAt = new Date().toISOString();
+    const base = orchestratorUrl();
+    if (!base) {
+      return {
+        orchestrator: { state: "not_configured", detail: "SOLOW_ORCHESTRATOR_URL is not set" },
+        engine: { state: "unknown", detail: null },
+        checkedAt,
+      };
+    }
+    // Only the orchestrator knows where the engine is, so an orchestrator that cannot be asked
+    // leaves the engine unknown rather than down.
+    const unasked = { state: "unknown" as const, detail: null };
+    let res: Response;
+    try {
+      res = await fetch(new URL("/health", base), {
+        cache: "no-store",
+        signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+      });
+    } catch {
+      return {
+        orchestrator: { state: "unreachable", detail: `no answer from ${base}` },
+        engine: unasked,
+        checkedAt,
+      };
+    }
+    // An orchestrator from before its health route answers every plain GET with 426 ("websocket
+    // only"). That is a process that is up and older than this web app, not one that is down.
+    if (res.status === 426) {
+      return {
+        orchestrator: { state: "outdated", detail: "orchestrator answered 426" },
+        engine: unasked,
+        checkedAt,
+      };
+    }
+    if (!res.ok) {
+      return {
+        orchestrator: { state: "unreachable", detail: `orchestrator answered ${res.status}` },
+        engine: unasked,
+        checkedAt,
+      };
+    }
+    // An orchestrator that answers without the report (one older than it) is up; it just has
+    // not said anything about the engine.
+    const report = orchestratorHealthReport.safeParse(await res.json().catch(() => null));
+    return {
+      orchestrator: { state: "ok", detail: null },
+      engine: report.success ? report.data.engine : unasked,
+      checkedAt,
+    };
+  },
+  async dockerAvailability(input) {
+    const base = orchestratorUrl();
+    // Null, not "unavailable": an orchestrator that cannot be asked has not said there is no
+    // Docker, and the Executors page must not turn a network blip into a default of Local.
+    if (!base) return null;
+    try {
+      const ticket = signStreamTicket(
+        { workspaceId: input.workspaceId, taskId: null },
+        webEnv().SOLOW_STREAM_SECRET,
+        Date.now(),
+      );
+      const res = await fetch(new URL("/executor-availability", base), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticket }),
+      });
+      if (!res.ok) return null;
+      return dockerAvailabilityReport.parse(await res.json());
+    } catch {
+      return null;
+    }
+  },
+  async executorImageBuild(input) {
+    const base = orchestratorUrl();
+    if (!base) return null;
+    try {
+      // Board-scoped, as for availability: the image belongs to the machine, not to a Task.
+      const ticket = signStreamTicket(
+        { workspaceId: input.workspaceId, taskId: null },
+        webEnv().SOLOW_STREAM_SECRET,
+        Date.now(),
+      );
+      const res = await fetch(
+        new URL(input.start ? "/executor-image/build" : "/executor-image", base),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ticket }),
+        },
+      );
+      if (!res.ok) return null;
+      return executorImageBuildStatus.parse(await res.json());
+    } catch {
+      return null;
+    }
+  },
   async probeHarnessProfile(input) {
     const base = orchestratorUrl();
     if (!base) throw new Error(`${UNWIRED}: harness probe unavailable`);
@@ -220,7 +371,12 @@ export const orchestrator: OrchestratorClient = {
     const res = await fetch(new URL("/probe-agent", base), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ticket, agentProfileId: input.agentProfileId }),
+      body: JSON.stringify({
+        ticket,
+        agentProfileId: input.agentProfileId,
+        ...(input.turn ? { turn: true } : {}),
+        ...(input.executorProfileId ? { executorProfileId: input.executorProfileId } : {}),
+      }),
     });
     if (!res.ok) {
       throw new Error(`orchestrator rejected probe: ${res.status} ${await res.text()}`);

@@ -35,6 +35,7 @@ import {
   WORKSPACE_SECTIONS,
   workflowIdFromPath,
 } from "@/lib/navigation";
+import { taskHref } from "@/lib/task-href";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
@@ -156,18 +157,6 @@ function ReviewCount({ value }: { value: number }) {
       <span aria-hidden className="size-1.5 rounded-full bg-current" />
       <span aria-hidden>{value}</span>
       <span className="sr-only">, {value === 1 ? "1 task" : `${value} tasks`} awaiting review</span>
-    </span>
-  );
-}
-
-function Wip() {
-  return (
-    <span
-      // The row's own name already says "(work in progress)" to a screen reader via `title`.
-      aria-hidden
-      className="shrink-0 rounded border px-1 text-[9px] text-muted-foreground uppercase leading-[1.5]"
-    >
-      WIP
     </span>
   );
 }
@@ -345,7 +334,7 @@ function ProjectRow({
                 icon={s.icon}
                 depth={1}
                 active={place.projectSection?.path === s.path}
-                trailing={s.wip ? <Wip /> : s.path === "/board" ? badge : undefined}
+                trailing={s.path === "/board" ? badge : undefined}
               />
             ))}
           </ul>
@@ -355,7 +344,10 @@ function ProjectRow({
   );
 }
 
-/** The Workspace-wide destinations: Unassigned, Workflows (with its pipelines while open), History. */
+/**
+ * The Workspace-wide destinations: Unassigned, Workflows (with its pipelines while open), History,
+ * Outcomes.
+ */
 function WorkspaceGroup({ place }: { place: Place }) {
   const counts = trpc.workspace.counts.useQuery();
   const unassignedCount = counts.data?.unassignedIssues ?? 0;
@@ -382,11 +374,8 @@ function WorkspaceGroup({ place }: { place: Place }) {
                 icon={s.icon}
                 active={here && !nests}
                 open={nests}
-                title={s.wip ? `${s.label} (work in progress)` : undefined}
                 trailing={
-                  s.wip ? (
-                    <Wip />
-                  ) : s.href === "/unassigned" && unassignedCount > 0 ? (
+                  s.href === "/unassigned" && unassignedCount > 0 ? (
                     <Count value={unassignedCount} />
                   ) : undefined
                 }
@@ -472,7 +461,7 @@ function RecentTaskRow({
   const style = STATE_STYLE[t.state];
   return (
     <NavItem
-      href={`/task/${t.id}`}
+      href={taskHref(t)}
       label={t.title}
       title={project ? `${t.title} · ${project.title}` : t.title}
       active={false}

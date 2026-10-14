@@ -13,6 +13,7 @@ import {
   KeyRound,
   Link2,
   Play,
+  Plus,
   RotateCcw,
   Trash2,
   TriangleAlert,
@@ -35,10 +36,15 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { type BoardColumn, lifecycleColumns, workflowColumns } from "@/lib/board-columns";
+import { describeError } from "@/lib/errors";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
-import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
+import {
+  BOARD_COLUMNS,
+  CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
+} from "@/lib/task-states";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { LaunchTaskDialog, useWorkflowChoices } from "../task/launch-task-dialog";
@@ -46,8 +52,10 @@ import { BlockedByDialog } from "./blocked-by-dialog";
 import { moveRefusal, stepMoveRefusal, waitingOn } from "./blockers";
 import { type BoardReferences, BoardReferencesProvider } from "./board-references";
 import { Column } from "./column";
+import { CreateTaskDialog } from "./create-task-dialog";
 import { DependencyCycleDialog } from "./dependency-cycle-dialog";
 import { DndBoard } from "./dnd-board";
+import { QuickTaskDialog } from "./quick-task-dialog";
 
 /** Pure presentational board — groups Tasks into lifecycle columns (used by tests). */
 export function BoardView({
@@ -123,14 +131,17 @@ function BoardSkeleton() {
 const LIFECYCLE_MODE = "lifecycle";
 
 /** Shown when the Workspace has no Tasks at all, rather than seven empty columns. */
-function BoardEmpty() {
+function BoardEmpty({ onNewTask }: { onNewTask: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-2 px-6 py-16">
+    <div className="flex flex-col items-start gap-3 px-6 py-16">
       <h2 className="font-medium text-sm">No tasks yet</h2>
       <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-        Create an issue to describe the work, then a task to hand a slice of it to a harness. It
-        runs in its own worktree and comes back here for your review.
+        Describe what you want done and an agent starts on it in its own worktree. When it finishes,
+        the work comes back here for your review.
       </p>
+      <Button size="sm" onClick={onNewTask}>
+        <Plus aria-hidden /> New task
+      </Button>
     </div>
   );
 }
@@ -159,6 +170,8 @@ export function Board({
   unassigned?: boolean | undefined;
 } = {}) {
   const utils = trpc.useUtils();
+  // `quick` is the one-sentence dialog, `full` the complete form it can hand over to.
+  const [newTask, setNewTask] = useState<"quick" | "full" | null>(null);
   // Which lifecycle column to scroll to on arrival, from the sidebar's `?column=` links — see
   // the effect near the return below.
   const targetColumn = useSearchParams().get("column");
@@ -347,7 +360,7 @@ export function Board({
         <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
         <div>
           <p className="font-medium">Failed to load the board</p>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{loadError.message}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{describeError(loadError)}</p>
         </div>
       </div>
     );
@@ -489,7 +502,15 @@ export function Board({
    * retry here is a fresh harness process picking the same work back up, not a restart from zero.
    */
   const retryAction = (task: TaskDto): ReactNode => {
-    if (task.state !== "failed" || task.failureReason === CREDENTIAL_EXPIRED_REASON) return null;
+    // Nor for an approval that committed and did not ship: a retry would run the harness over
+    // approved work. Its way out — Ship again, or Keep local — is on the Task's own page.
+    if (
+      task.state !== "failed" ||
+      task.failureReason === CREDENTIAL_EXPIRED_REASON ||
+      task.failureReason === DELIVERY_FAILED_REASON
+    ) {
+      return null;
+    }
     return (
       <Button
         key={`retry-${task.id}`}
@@ -594,31 +615,36 @@ export function Board({
 
   return (
     <BoardReferencesProvider value={references}>
-      {workflows.length > 0 ? (
-        <div className="flex items-center gap-2 px-4 pt-3">
-          <span className="text-2xs text-muted-foreground uppercase tracking-[0.12em]">
-            Columns
-          </span>
-          <Select
-            value={pickerValue}
-            onValueChange={(value) =>
-              setSelectedWorkflowId(value === LIFECYCLE_MODE ? null : value)
-            }
-          >
-            <SelectTrigger size="sm" className="w-56" aria-label="Board columns">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={LIFECYCLE_MODE}>Lifecycle</SelectItem>
-              {workflows.map((workflow) => (
-                <SelectItem key={workflow.id} value={workflow.id}>
-                  {workflow.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
+      <div className="flex items-center gap-2 px-4 pt-3">
+        {workflows.length > 0 ? (
+          <>
+            <span className="text-2xs text-muted-foreground uppercase tracking-[0.12em]">
+              Columns
+            </span>
+            <Select
+              value={pickerValue}
+              onValueChange={(value) =>
+                setSelectedWorkflowId(value === LIFECYCLE_MODE ? null : value)
+              }
+            >
+              <SelectTrigger size="sm" className="w-56" aria-label="Board columns">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={LIFECYCLE_MODE}>Lifecycle</SelectItem>
+                {workflows.map((workflow) => (
+                  <SelectItem key={workflow.id} value={workflow.id}>
+                    {workflow.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : null}
+        <Button size="sm" className="ml-auto" onClick={() => setNewTask("quick")}>
+          <Plus aria-hidden /> New task
+        </Button>
+      </div>
       {errorMessage ? (
         <div
           className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 py-2 pr-2 pl-3 text-state-failed text-sm"
@@ -640,7 +666,7 @@ export function Board({
         </div>
       ) : null}
       {tasks.length === 0 ? (
-        <BoardEmpty />
+        <BoardEmpty onNewTask={() => setNewTask("quick")} />
       ) : (
         <DndBoard
           tasks={tasks}
@@ -656,6 +682,16 @@ export function Board({
           submittingOn={pendingOn}
         />
       )}
+      <QuickTaskDialog
+        open={newTask === "quick"}
+        onOpenChange={(open) => setNewTask(open ? "quick" : null)}
+        onFullForm={() => setNewTask("full")}
+      />
+      <CreateTaskDialog
+        trigger={null}
+        open={newTask === "full"}
+        onOpenChange={(open) => setNewTask(open ? "full" : null)}
+      />
       <ConfirmDialog
         open={pendingMove !== null}
         onOpenChange={(open) => {

@@ -84,6 +84,13 @@ const HANDLERS = {
     steps: [],
     ready: true,
   }),
+  "workspace.historyRetention": () => ({ days: 30, defaultDays: 30, options: [7, 30, 90, 365] }),
+  "workspace.previewHistoryRetention": () => ({
+    tasks: 0,
+    sessions: 0,
+    events: 0,
+    diffs: 0,
+  }),
 };
 
 describe("the settings registry", () => {

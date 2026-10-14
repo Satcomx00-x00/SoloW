@@ -32,6 +32,7 @@ import {
   executorProfile,
   harnessProfile,
   issue,
+  LOCAL_OWNER_ID,
   repository,
   secret,
   task,
@@ -224,7 +225,7 @@ async function seedTenants(): Promise<void> {
   const db = createDb();
   // The first one is the product's own bootstrap, at the id dev-owner mode binds to — so the
   // suite exercises the same starting state a real local install has.
-  await bootstrapWorkspace(db, { name: "E2E workspace", ownerUserId: "local-owner" });
+  await bootstrapWorkspace(db, { name: "E2E workspace", ownerUserId: LOCAL_OWNER_ID });
   await seedCoreProfiles(db, LOCAL_WORKSPACE);
 
   await db

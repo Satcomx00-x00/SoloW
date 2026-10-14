@@ -201,7 +201,15 @@ export function ProjectRoadmap({
               {plan.bars.map((bar) => {
                 const { left, width } = geometry(bar, plan);
                 return (
-                  <li key={bar.row.item.id} className="flex items-center gap-2">
+                  /*
+                   * One bar per dated row, and a project can date a thousand: off-screen rows skip
+                   * layout and paint until they scroll in. Every row is the bar's fixed 20px, so
+                   * the placeholder height is exact and the scrollbar does not drift.
+                   */
+                  <li
+                    key={bar.row.item.id}
+                    className="flex items-center gap-2 [contain-intrinsic-size:auto_20px] [content-visibility:auto]"
+                  >
                     <span className="w-48 shrink-0 truncate text-xs" title={bar.row.title}>
                       {bar.row.title}
                     </span>

@@ -223,8 +223,19 @@ export async function listProjectItems(
   ctx: RequestContext,
   input: ListProjectItemsInput,
 ): Promise<Result<ProjectItemPageDto, typeof CommonErrorCode.NotFound>> {
-  const owned = await getProject(ctx, input.projectId);
-  if (!owned.ok) return err(CommonErrorCode.NotFound);
+  /*
+   * Ownership, and whether the Project is mirrored — not `getProject`. That builds the whole
+   * Project's DTO: for a local one, up to `PROJECT_ITEM_CEILING` Issues read and run through
+   * `deriveLocalProjectFields` to find its columns, which this page never reads (its cells are
+   * derived from its own rows, below). `listAllProjectItems` calls this once per 500-row page,
+   * so a large local Project rebuilt its full vocabulary ten times to answer one request.
+   */
+  const [owned] = await ctx.db
+    .select({ id: project.id, integrationId: project.integrationId })
+    .from(project)
+    .where(and(eq(project.workspaceId, ctx.workspaceId), eq(project.id, input.projectId)))
+    .limit(1);
+  if (!owned) return err(CommonErrorCode.NotFound);
 
   const after = input.cursor ? Number.parseInt(input.cursor, 10) : null;
   const scope = and(
@@ -275,8 +286,21 @@ export async function listProjectItems(
   const total = counted?.total ?? 0;
 
   const byItem = new Map<string, ProjectItemDto["values"]>();
-  if (owned.data.integrationId) {
-    const typeByFieldId = new Map(owned.data.fields.map((f) => [f.id, f.type]));
+  if (owned.integrationId) {
+    // Only the types — the parse needs nothing else of a field.
+    const typeByFieldId = new Map(
+      (
+        await ctx.db
+          .select({ id: projectField.id, type: projectField.type })
+          .from(projectField)
+          .where(
+            and(
+              eq(projectField.workspaceId, ctx.workspaceId),
+              eq(projectField.projectId, owned.id),
+            ),
+          )
+      ).map((f) => [f.id, f.type]),
+    );
     const ids = rows.map((r) => r.item.id);
     const values = ids.length
       ? await ctx.db
@@ -300,7 +324,7 @@ export async function listProjectItems(
   } else {
     // A local Project's `project_value` table is always empty — its cells are derived the same
     // way its columns are (see `getProject` and `project-local-fields.ts`), from exactly this
-    // page's Issues rather than the whole Project's (the vocabulary in `owned.data.fields` may
+    // page's Issues rather than the whole Project's (the vocabulary `getProject` returns may
     // be a superset, which is fine: a cell only needs its own value, never the full option list).
     const { valuesByIssueId } = deriveLocalProjectFields(
       rows.map((r) => ({

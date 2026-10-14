@@ -140,11 +140,10 @@ export function currentIterationsFor(
   return current;
 }
 
+type SortKey = { empty: boolean; number: number | null; text: string };
+
 /** How one row sorts under one column: numbers as numbers, and "unset" always last. */
-function sortKey(
-  row: ProjectRow,
-  field: ProjectFieldDto | null,
-): { empty: boolean; number: number | null; text: string } {
+function sortKey(row: ProjectRow, field: ProjectFieldDto | null): SortKey {
   if (!field) return { empty: row.title === "", number: null, text: row.title.toLowerCase() };
   const value = row.item.values[field.id];
   // A priority the column shows has to be a priority the sort can see, or "sort by Priority"
@@ -231,16 +230,25 @@ export function sortProjectRows(
   if (!field && sort.field !== PROJECT_TITLE_KEY) return [...rows];
 
   const direction = sort.direction === "desc" ? -1 : 1;
+  // Each row's key once, not twice per comparison: building one reads the field's options and
+  // joins strings, and a sort of n rows compares about n·log n times.
+  const keys = new Map(rows.map((row) => [row, sortKey(row, field)] as const));
   return [...rows].sort((a, b) => {
-    const left = sortKey(a, field);
-    const right = sortKey(b, field);
+    const left = keys.get(a) as SortKey;
+    const right = keys.get(b) as SortKey;
     if (left.empty !== right.empty) return left.empty ? 1 : -1;
     if (left.number !== null && right.number !== null) {
       return (left.number - right.number) * direction;
     }
-    return left.text.localeCompare(right.text) * direction;
+    return TEXT_ORDER.compare(left.text, right.text) * direction;
   });
 }
+
+/**
+ * `localeCompare` with no locale or options, built once. It is the same comparison — the
+ * argument-less call is specified as a default `Intl.Collator` — without constructing one per call.
+ */
+const TEXT_ORDER = new Intl.Collator();
 
 /**
  * The view's column set, expressed the way the table already asks for it.

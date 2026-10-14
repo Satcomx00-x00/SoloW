@@ -15,5 +15,6 @@ describe("INNGEST_FUNCTIONS", () => {
     const ids = INNGEST_FUNCTIONS.map((fn) => fn.id());
     expect(ids).toContain("task-run");
     expect(ids).toContain("repository-sync");
+    expect(ids).toContain("task-redeliver");
   });
 });

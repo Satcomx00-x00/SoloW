@@ -55,3 +55,14 @@ separately (for example with AsyncAPI) and is out of scope here.
   **Inngest** durable orchestration ([Decision 0004](./0004-durable-orchestration-engine.md)).
 - Affects the [building block view](../architecture/05-building-blocks.md) and the API-surface
   constraint in the constitution.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** tRPC carries queries and mutations; `apps/web/openapi.json` is generated from
+the routers (176 paths) and checked for staleness in CI; the orchestrator's WebSocket carries the
+live stream, and a second socket carries the Task terminal. The same router also feeds the MCP
+server at `/api/mcp`, which this decision did not anticipate and which reuses its single
+authorisation path.

@@ -1,7 +1,15 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { authSchema, harnessCatalog, workspace } from "@solow/db";
+import {
+  authSchema,
+  bootstrapWorkspace,
+  harnessCatalog,
+  LOCAL_WORKSPACE_ID,
+  mcpServer,
+  skill,
+  workspace,
+} from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { createAuth, ownerExists, workspaceForUser } from "./auth.js";
@@ -29,6 +37,38 @@ async function signUpOwner(): Promise<{ cookie: string; userId: string }> {
   const response = await auth.api.signUpEmail({ body: OWNER, returnHeaders: true });
   const cookie = response.headers.get("set-cookie") ?? "";
   return { cookie, userId: response.response.user.id };
+}
+
+/**
+ * The same database, with every `select` answering `ms` after it was read: the query runs when
+ * awaited, and its rows are handed back later — what a read looks like over a network driver,
+ * or from a process that another one is writing beside.
+ */
+function lateReads(target: TestDb, ms: number): TestDb {
+  const late = (builder: object): object =>
+    new Proxy(builder, {
+      get(obj, prop) {
+        const value = Reflect.get(obj, prop);
+        if (prop === "then" && typeof value === "function") {
+          return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+            (value as PromiseLike<unknown>["then"])
+              .call(obj, (rows) => new Promise((r) => setTimeout(() => r(rows), ms)))
+              .then(resolve, reject);
+        }
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          const out = (value as (...a: unknown[]) => unknown).apply(obj, args);
+          return out !== null && typeof out === "object" ? late(out) : out;
+        };
+      },
+    });
+  return new Proxy(target, {
+    get(obj, prop) {
+      const value = Reflect.get(obj, prop);
+      if (prop !== "select" || typeof value !== "function") return value;
+      return (...args: unknown[]) => late((value as (...a: unknown[]) => object).apply(obj, args));
+    },
+  });
 }
 
 /** The headers a browser would send back with that cookie. */
@@ -62,6 +102,29 @@ describe("owner account creation", () => {
     expect(users).toHaveLength(1);
   });
 
+  it("lets exactly one of two simultaneous sign-ups through", async () => {
+    // The check is a count read before the insert. With the synchronous driver nothing else in
+    // this process runs between the two, but a second process on the same file can, and so can
+    // any driver whose answers arrive later than they were read — modelled here by delaying every
+    // read's answer. Two sign-ups then both counted zero, both became Owners, and the first one
+    // through `provisionOwnerWorkspace` took the local Workspace.
+    await bootstrapWorkspace(db);
+    auth = createAuth(lateReads(db, 100));
+
+    const results = await Promise.allSettled([
+      auth.api.signUpEmail({ body: OWNER }),
+      auth.api.signUpEmail({
+        body: { email: "intruder@example.test", password: "another-long-password", name: "X" },
+      }),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const users = await db.select().from(authSchema.authUser);
+    expect(users).toHaveLength(1);
+    const owners = await db.select({ owner: workspace.ownerUserId }).from(workspace);
+    expect(owners.map((w) => w.owner)).toEqual([users[0]?.id ?? "no user"]);
+  });
+
   it("starts a new Workspace with no flag overrides — every flag at its registry default", async () => {
     const { userId } = await signUpOwner();
     const [row] = await db
@@ -72,6 +135,40 @@ describe("owner account creation", () => {
     // Sign-up writes no overrides: every flag reads its registry default, which is ON since
     // constitution v1.5.0. Turning one off is an operator's kill switch, never sign-up's.
     expect(row?.enabledFlags ?? null).toBeNull();
+  });
+
+  it("hands the first Owner the local Workspace bootstrap made, not an empty new one", async () => {
+    // Every Issue, Task and Session a local install has lives in LOCAL_WORKSPACE_ID, owned by
+    // the bootstrap's stand-in. Creating a fresh Workspace here left the first real sign-in
+    // looking at an empty board while all of it sat in a Workspace nobody could reach.
+    await bootstrapWorkspace(db);
+
+    const { userId } = await signUpOwner();
+
+    expect(await workspaceForUser(db, userId)).toBe(LOCAL_WORKSPACE_ID);
+    expect(await db.select({ id: workspace.id }).from(workspace)).toHaveLength(1);
+  });
+
+  it("does not take a local Workspace someone else already owns", async () => {
+    await bootstrapWorkspace(db, { ownerUserId: "an-earlier-owner" });
+
+    const { userId } = await signUpOwner();
+
+    const own = await workspaceForUser(db, userId);
+    expect(own).not.toBe(LOCAL_WORKSPACE_ID);
+    const [local] = await db.select().from(workspace).where(eq(workspace.id, LOCAL_WORKSPACE_ID));
+    expect(local?.ownerUserId).toBe("an-earlier-owner");
+  });
+
+  it("seeds a Workspace it has to create the way bootstrap seeds the local one", async () => {
+    const { userId } = await signUpOwner();
+    const workspaceId = (await workspaceForUser(db, userId)) ?? "";
+
+    // The catalog was already seeded here; the libraries' starter rows were not.
+    for (const table of [harnessCatalog, mcpServer, skill]) {
+      const rows = await db.select().from(table).where(eq(table.workspaceId, workspaceId));
+      expect(rows.length).toBeGreaterThan(0);
+    }
   });
 
   it("rejects a password below the minimum length", async () => {
@@ -123,11 +220,12 @@ describe("resolveSession", () => {
 
   it("refuses a user with no Workspace rather than a session without a tenant key", async () => {
     const { cookie, userId } = await signUpOwner();
-    // Sign-up also seeds the Workspace's default harness catalog row (issue #10); delete it first
-    // so the Workspace delete below isn't rejected by its own foreign key.
-    const [ws] = await db.select().from(workspace).where(eq(workspace.ownerUserId, userId));
-    if (ws) await db.delete(harnessCatalog).where(eq(harnessCatalog.workspaceId, ws.id));
-    await db.delete(workspace).where(eq(workspace.ownerUserId, userId));
+    // Handed to someone else rather than deleted: sign-up seeds rows that hold the Workspace by
+    // foreign key, and what matters here is only that this user owns none.
+    await db
+      .update(workspace)
+      .set({ ownerUserId: "someone-else" })
+      .where(eq(workspace.ownerUserId, userId));
 
     // Half a session is worse than none: `workspaceId` would then have to come from somewhere
     // other than the session, which is exactly what Principle V forbids.

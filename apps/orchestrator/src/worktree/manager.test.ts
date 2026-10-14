@@ -139,12 +139,15 @@ describe("cloning an imported repository", () => {
     });
 
     const args = calls.find((c) => c.cmd.includes("clone"))?.cmd ?? [];
-    const helpers = args.filter((a) => a.startsWith("credential.helper="));
+    const helpers = args.filter((a) => a.startsWith("credential."));
     // The empty one first, so a credential cached on the host cannot win over this
-    // Integration's token; then the helper that reads the environment variable.
+    // Integration's token; then the helper that reads the environment variable, for the
+    // repository's own origin only.
     expect(helpers[0]).toBe("credential.helper=");
+    expect(helpers[1]).toStartWith("credential.https://gitlab.com.helper=");
     expect(helpers[1]).toContain("username=x-access-token");
     expect(helpers[1]).toContain("$SOLOW_SCM_TOKEN");
+    expect(helpers).toHaveLength(2);
   });
 
   it("disables git's terminal prompt so a bad token fails instead of hanging", async () => {

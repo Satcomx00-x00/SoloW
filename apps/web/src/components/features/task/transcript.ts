@@ -354,6 +354,44 @@ function withStep(n: Normalised | null, stepId: string | null | undefined): Norm
 }
 
 /**
+ * The persisted half of a transcript, normalised, deduplicated and in order — prepared once.
+ *
+ * `session.get`'s answer does not change between stream frames, but the transcript used to be
+ * rebuilt from it on every one: every event normalised again, and the whole log sorted again,
+ * thousands of events on a long run, to fold in the few that had just arrived. Prepared once per
+ * answer, a frame costs the live events and one linear fold.
+ */
+export interface PersistedTranscript {
+  readonly normalised: readonly Normalised[];
+  readonly keys: ReadonlySet<string>;
+  readonly sessionOrder: readonly string[];
+}
+
+const keyOf = (n: Normalised) => `${n.sessionId}:${n.seq}`;
+
+export function preparePersistedTranscript(
+  persisted: readonly SessionEventDto[],
+): PersistedTranscript {
+  const keys = new Set<string>();
+  const normalised: Normalised[] = [];
+  const sessionOrder: string[] = [];
+  // The Step is stamped here rather than in each normaliser's eleven branches: it is the one
+  // field every variant carries the same way.
+  for (const e of persisted) {
+    const n = withStep(fromPersisted(e), e.workflowStepId);
+    if (!n || keys.has(keyOf(n))) continue;
+    keys.add(keyOf(n));
+    if (!sessionOrder.includes(n.sessionId)) sessionOrder.push(n.sessionId);
+    normalised.push(n);
+  }
+  const rank = new Map(sessionOrder.map((id, i) => [id, i]));
+  normalised.sort(
+    (a, b) => (rank.get(a.sessionId) ?? 0) - (rank.get(b.sessionId) ?? 0) || a.seq - b.seq,
+  );
+  return { normalised, keys, sessionOrder };
+}
+
+/**
  * Build the transcript.
  *
  * `live` is appended after `persisted` and deduplicated against it, so an event the socket
@@ -365,30 +403,44 @@ export function buildTranscript(
   persisted: readonly SessionEventDto[],
   live: readonly TaskEvent[],
 ): TranscriptRow[] {
-  const seen = new Set<string>();
-  const normalised: Normalised[] = [];
-  const sessionOrder: string[] = [];
+  return buildTranscriptFrom(preparePersistedTranscript(persisted), live);
+}
 
-  const take = (n: Normalised | null) => {
-    if (!n) return;
-    const key = `${n.sessionId}:${n.seq}`;
-    if (seen.has(key)) return;
+/** `buildTranscript` over a persisted half already prepared — see `preparePersistedTranscript`. */
+export function buildTranscriptFrom(
+  base: PersistedTranscript,
+  live: readonly TaskEvent[],
+): TranscriptRow[] {
+  // Persisted first, so it wins the dedup: it is the copy that survived the database.
+  const seen = new Set<string>();
+  const fresh: Normalised[] = [];
+  const sessionOrder = [...base.sessionOrder];
+  for (const e of live) {
+    const n = withStep(fromLive(e), "workflowStepId" in e ? e.workflowStepId : null);
+    if (!n) continue;
+    const key = keyOf(n);
+    if (base.keys.has(key) || seen.has(key)) continue;
     seen.add(key);
     if (!sessionOrder.includes(n.sessionId)) sessionOrder.push(n.sessionId);
-    normalised.push(n);
-  };
+    fresh.push(n);
+  }
 
-  // Persisted first, so it wins the dedup: it is the copy that survived the database.
-  // The Step is stamped here rather than in each normaliser's eleven branches: it is the one
-  // field every variant carries the same way.
-  for (const e of persisted) take(withStep(fromPersisted(e), e.workflowStepId));
-  for (const e of live)
-    take(withStep(fromLive(e), "workflowStepId" in e ? e.workflowStepId : null));
-
+  // A Session the socket introduced ranks after every persisted one, so the persisted half's
+  // order still holds and the live events merge into it rather than everything being re-sorted.
   const rank = new Map(sessionOrder.map((id, i) => [id, i]));
-  normalised.sort(
-    (a, b) => (rank.get(a.sessionId) ?? 0) - (rank.get(b.sessionId) ?? 0) || a.seq - b.seq,
-  );
+  const before = (a: Normalised, b: Normalised) =>
+    (rank.get(a.sessionId) ?? 0) - (rank.get(b.sessionId) ?? 0) || a.seq - b.seq;
+  fresh.sort(before);
+  const normalised: Normalised[] = [];
+  let i = 0;
+  for (const n of fresh) {
+    while (i < base.normalised.length && before(base.normalised[i] as Normalised, n) < 0) {
+      normalised.push(base.normalised[i] as Normalised);
+      i += 1;
+    }
+    normalised.push(n);
+  }
+  for (; i < base.normalised.length; i += 1) normalised.push(base.normalised[i] as Normalised);
 
   const rows: TranscriptRow[] = [];
   // Correlation keyed on `(sessionId, callId)`, never `callId` alone: ids restart per session,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -49,7 +50,7 @@ export function SeedDefaultLabelsButton({
       )}
       {seed.error && (
         <p className="text-destructive text-xs" role="alert">
-          {seed.error.message}
+          {describeError(seed.error)}
         </p>
       )}
     </div>

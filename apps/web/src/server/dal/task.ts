@@ -27,6 +27,7 @@ import {
   CREDENTIAL_EXPIRED_REASON,
   checkDependencyEdge,
   checkParentEdge,
+  DELIVERY_FAILED_REASON,
   resumeWorkflowCursor,
   taskCheckoutBranch,
   taskSubtree,
@@ -34,6 +35,7 @@ import {
   withinRetention,
 } from "@solow/core";
 import {
+  claimTaskRunSlot,
   harnessProfile,
   projectItem,
   session,
@@ -541,7 +543,7 @@ export async function updateTaskState(
   ctx: RequestContext,
   id: string,
   state: TaskState,
-  extra?: { failureReason?: string | null },
+  extra?: { failureReason?: string | null; completedAt?: string | null },
 ): Promise<Result<TaskDto, typeof CommonErrorCode.NotFound>> {
   const [row] = await ctx.db
     .update(task)
@@ -564,6 +566,8 @@ export async function updateTaskState(
       ...(state === "ready"
         ? { completedAt: null, completedOutcome: null, completedSummary: null }
         : {}),
+      // Putting back what a run claim cleared (`claimTaskRunSlot`), when the run never started.
+      ...(extra?.completedAt !== undefined ? { completedAt: extra.completedAt } : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
@@ -598,23 +602,63 @@ export async function claimTaskState(
   return ok(taskToDto(row, attachments.get(row.id) ?? []));
 }
 
-/** Count a profile's Tasks currently in `running` (for the concurrency cap). */
-export async function countRunningForHarnessProfile(
+/**
+ * Keep local (A1): finish a Task whose approval committed and could not ship, with the commit on
+ * this machine as its result — the outcome every approval had before shipping existed, and the
+ * only one available to a token that may read the repository but not write to it.
+ *
+ * Conditional on the Task still being that failure, in the same statement, so it cannot finish a
+ * Task that Ship again moved on, or one that failed for a reason Retry is for.
+ */
+export async function keepUndeliveredLocal(
   ctx: RequestContext,
-  harnessProfileId: string,
-): Promise<number> {
-  const rows = await ctx.db
-    .select({ id: task.id })
-    .from(task)
+  id: string,
+): Promise<Result<TaskDto, typeof TaskErrorCode.NotUndelivered>> {
+  const [row] = await ctx.db
+    .update(task)
+    .set({ state: "done", failureReason: null, updatedAt: new Date().toISOString() })
     .where(
       and(
         eq(task.workspaceId, ctx.workspaceId),
-        eq(task.agentProfileId, harnessProfileId),
-        eq(task.state, "running"),
-        liveTask(),
+        eq(task.id, id),
+        eq(task.state, "failed"),
+        eq(task.failureReason, DELIVERY_FAILED_REASON),
       ),
-    );
-  return rows.length;
+    )
+    .returning();
+  if (!row) return err(TaskErrorCode.NotUndelivered);
+  const attachments = await attachmentsForTasks(ctx, [row.id]);
+  return ok(taskToDto(row, attachments.get(row.id) ?? []));
+}
+
+/**
+ * Move a Task into `running` from one of `from`, but only while its Harness Profile has a slot
+ * left under its concurrency cap (spec FR-017) — in one statement, or not at all.
+ *
+ * The rule itself is `claimTaskRunSlot` in `@solow/db`, shared with the orchestrator's wake from
+ * a quota park so there is one cap, not two. This is the Workspace-scoped wrapper the routers use.
+ *
+ * On a loss, the row says which race was lost: still in `from` means the cap refused it, anything
+ * else means another start or the run itself moved it first.
+ */
+export async function claimTaskRun(
+  ctx: RequestContext,
+  id: string,
+  from: readonly TaskState[],
+): Promise<
+  Result<
+    TaskDto,
+    | typeof CommonErrorCode.NotFound
+    | typeof TaskErrorCode.AlreadyStarted
+    | typeof TaskErrorCode.ConcurrencyCapReached
+  >
+> {
+  const claimed = claimTaskRunSlot(ctx.db, ctx.workspaceId, id, from);
+  if (claimed.kind === "missing") return err(CommonErrorCode.NotFound);
+  if (claimed.kind === "cap_reached") return err(TaskErrorCode.ConcurrencyCapReached);
+  if (claimed.kind === "moved") return err(TaskErrorCode.AlreadyStarted);
+  const attachments = await attachmentsForTasks(ctx, [claimed.row.id]);
+  return ok(taskToDto(claimed.row, attachments.get(claimed.row.id) ?? []));
 }
 
 /**

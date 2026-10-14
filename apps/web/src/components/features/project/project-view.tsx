@@ -6,7 +6,7 @@ import type {
   ProjectFilter,
   ProjectViewConfig,
 } from "@solow/contracts";
-import { DEFAULT_PROJECT_VIEW_CONFIG, PROJECT_TITLE_KEY } from "@solow/contracts";
+import { CommonErrorCode, DEFAULT_PROJECT_VIEW_CONFIG, PROJECT_TITLE_KEY } from "@solow/contracts";
 import {
   FILTER_ME,
   formatProjectFilter,
@@ -19,6 +19,7 @@ import {
 } from "@solow/core";
 import {
   ArrowDownAZ,
+  ArrowLeft,
   ArrowUpAZ,
   CalendarRange,
   Columns3,
@@ -31,16 +32,16 @@ import {
   Table2,
   Tags,
   Trash2,
+  TriangleAlert,
   UserX,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CreateTaskDialog, type TaskPreset } from "@/components/features/board/create-task-dialog";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import type { TaskPreset } from "@/components/features/board/create-task-dialog";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { IssuePanel } from "@/components/features/project/issue-panel";
-import { LaunchIssuesDialog } from "@/components/features/project/launch-issues-dialog";
 import type { PriorityChoice } from "@/components/features/project/project-cell";
 import { ProjectCreateMenu } from "@/components/features/project/project-create-menu";
 import { ProjectRepositoriesDialog } from "@/components/features/project/project-repositories-dialog";
@@ -74,6 +75,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import {
   clearDraftOverlay,
@@ -177,6 +179,35 @@ export function projectHref(
   const base = `/projects/${projectId}`;
   return query ? `${base}?${query}` : base;
 }
+
+/** Here the thing that went missing is the Project, so the shared sentence can say so. */
+/*
+ * The two row-triggered dialogs, loaded the first time a row asks for one. Both are mounted only
+ * while open (at the bottom of `ProjectView`), so a static import made every visit to a project
+ * download and parse two forms the visit most likely never opens.
+ */
+const CreateTaskDialog = lazy(() =>
+  import("@/components/features/board/create-task-dialog").then((m) => ({
+    default: m.CreateTaskDialog,
+  })),
+);
+const LaunchIssuesDialog = lazy(() =>
+  import("@/components/features/project/launch-issues-dialog").then((m) => ({
+    default: m.LaunchIssuesDialog,
+  })),
+);
+
+/**
+ * The overlay of a tab with no draft on it. One object, not a `{}` per render: a fresh literal
+ * made `config` new on every render after a Save, and with it the whole filter-and-sort pass and
+ * every row of the table — for as long as the tab stayed open.
+ */
+const NO_DRAFT: ProjectViewDraftOverlay = {};
+
+const PROJECT_WORDING = {
+  [CommonErrorCode.NotFound]:
+    "This project no longer exists — it may have been deleted, or the link is out of date.",
+};
 
 /**
  * The planning table for one Project.
@@ -292,7 +323,29 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   const refreshRows = useRowRefresh();
   const saveLayout = trpc.preference.setSurfaceLayout.useMutation({
-    onSuccess: () => void utils.preference.getSurfaceLayout.invalidate(),
+    /*
+     * Into the cache before the round trip, the way `useSurfaceLayout` does it: a column released
+     * after a drag must stay where it was let go, not spring back to the old width for as long as
+     * the write takes.
+     */
+    onMutate: ({ layout: next }) =>
+      utils.preference.getSurfaceLayout.setData({ surface: "project-table" }, (previous) =>
+        previous
+          ? {
+              ...previous,
+              layout: {
+                order: next.order,
+                hidden: next.hidden,
+                shown: next.shown ?? [],
+                widths: next.widths ?? {},
+              },
+            }
+          : previous,
+      ),
+    // Settled, so a save that failed stops looking saved; and this surface only — the status
+    // bar's and the palette's layouts are not what was written.
+    onSettled: () =>
+      void utils.preference.getSurfaceLayout.invalidate({ surface: "project-table" }),
   });
 
   const onSynced = () => {
@@ -425,7 +478,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     viewId: null,
     config: {},
   });
-  const drafted = draft.viewId === activeViewId ? draft.config : {};
+  const drafted = draft.viewId === activeViewId ? draft.config : NO_DRAFT;
   /** Which tab a stored draft belongs to — `activeViewId` names one, or "default" names none. */
   const draftStorageKey = activeViewId ?? "default";
   const patchDraft = (patch: ProjectViewDraftOverlay) => {
@@ -451,17 +504,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   const savedText = formatProjectFilter(saved.filter);
   const filterText = params.get("q") ?? savedText;
-  const [typed, setTyped] = useState(filterText);
-  // The URL is the source of truth, so a filter cleared elsewhere — the back button, a tab
-  // switch — has to reach this input too.
-  useEffect(() => setTyped(filterText), [filterText]);
-  useEffect(() => {
-    if (typed === filterText) return;
-    // On a pause, not per keystroke: a router replace per character re-runs the parse mid-word
-    // and fights the cursor. The same 250ms the Issues search box uses.
-    const timer = setTimeout(() => go({ q: typed === savedText ? null : typed }), 250);
-    return () => clearTimeout(timer);
-  }, [typed, filterText, savedText, go]);
 
   const config: ProjectViewConfig = useMemo(
     () => ({
@@ -544,6 +586,26 @@ export function ProjectView({ projectId }: { projectId: string }) {
   }, [items.data, issues.data, tasks.data]);
 
   const fields = useMemo(() => project.data?.fields ?? [], [project.data]);
+  // Held still for the row memo, like the handlers above: written inline it was the one prop that
+  // differed on every render and redrew every row on screen.
+  const setRowPriority = useCallback(
+    (row: ProjectRow, label: string | null) => {
+      const field = fields.find((f) => isPriorityFieldName(f.name));
+      if (!field) return;
+      const key = `${row.item.id}:${field.id}`;
+      setPending((p) => [...p, key]);
+      setPriority.mutate(
+        {
+          issueId: row.item.issueId,
+          // Every label that is not a priority survives untouched — a provider takes a
+          // whole label set, so this is the one write that could silently drop `area/web`.
+          labels: withPriorityLabel(row.labels, label),
+        },
+        { onSettled: () => setPending((p) => p.filter((k) => k !== key)) },
+      );
+    },
+    [fields, setPriority.mutate],
+  );
   /**
    * The complete row set, in the view's order — what the table builds its hierarchy from.
    *
@@ -563,16 +625,31 @@ export function ProjectView({ projectId }: { projectId: string }) {
     [allRows, fields, config.sort],
   );
 
-  const rows: ProjectRow[] = useMemo(
+  /*
+   * Filtered, but not sorted again: `hierarchyRows` already holds every row in the view's order,
+   * and the sort is stable, so keeping the rows that pass the filter in that order is the same
+   * answer `applyProjectView` gives with the sort — one sort of the project instead of two, and a
+   * filter keystroke that sorts nothing.
+   */
+  const filtered = useMemo(
     () =>
-      applyProjectView(allRows, fields, config, {
-        // The stated mapping, or null while it is still loading and when nobody has stated one.
-        // Null matches nothing rather than everything — a `My items` tab quietly showing the
-        // whole project is the worse of the two failures, and the banner below says which it is.
-        me: me.data?.login ?? null,
-      }),
+      applyProjectView(
+        allRows,
+        fields,
+        { ...config, sort: null },
+        {
+          // The stated mapping, or null while it is still loading and when nobody has stated one.
+          // Null matches nothing rather than everything — a `My items` tab quietly showing the
+          // whole project is the worse of the two failures, and the banner below says which it is.
+          me: me.data?.login ?? null,
+        },
+      ),
     [allRows, fields, config, me.data],
   );
+  const rows: ProjectRow[] = useMemo(() => {
+    const kept = new Set(filtered);
+    return hierarchyRows.filter((row) => kept.has(row));
+  }, [filtered, hierarchyRows]);
 
   /**
    * The mapping is missing, and this view is asking for it.
@@ -731,7 +808,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       </div>
       {deleteProject.error && (
         <p className="border-b px-4 py-2 text-destructive text-xs" role="alert">
-          {deleteProject.error.message}
+          {describeError(deleteProject.error)}
         </p>
       )}
 
@@ -752,13 +829,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
             aria-hidden
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/70"
           />
-          <Input
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            aria-label="Filter items"
-            placeholder={'status:"In progress" assignee:@me -label:blocked'}
-            className="h-7 pl-8 text-xs"
-          />
+          <ProjectFilterInput filterText={filterText} savedText={savedText} go={go} />
         </span>
 
         {/* Layout is a projection of the same rows, so switching one fetches nothing. */}
@@ -1044,7 +1115,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       {setValue.error && (
         <p className="shrink-0 border-b bg-state-failed/5 px-4 py-1.5 text-2xs text-state-failed">
           {/* The provider's value is still on screen: the write failed, so nothing changed. */}
-          {setValue.error.message}
+          {describeError(setValue.error)}
         </p>
       )}
 
@@ -1062,21 +1133,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
             columnOrder={layout.data?.layout.order}
             labelColours={labelColours}
             priorityChoices={priorityChoices}
-            onSetPriority={(row, label) => {
-              const field = fields.find((f) => isPriorityFieldName(f.name));
-              if (!field) return;
-              const key = `${row.item.id}:${field.id}`;
-              setPending((p) => [...p, key]);
-              setPriority.mutate(
-                {
-                  issueId: row.item.issueId,
-                  // Every label that is not a priority survives untouched — a provider takes a
-                  // whole label set, so this is the one write that could silently drop `area/web`.
-                  labels: withPriorityLabel(row.labels, label),
-                },
-                { onSettled: () => setPending((p) => p.filter((k) => k !== key)) },
-              );
-            }}
+            onSetPriority={setRowPriority}
             /*
              * A width is stored per column, and `null` means "fit the content" — which is stored
              * as *absence* rather than as a number, so the column goes on tracking its content
@@ -1123,6 +1180,25 @@ export function ProjectView({ projectId }: { projectId: string }) {
             onSort={(field) => patchDraft({ sort: cycleSort(config.sort, field) })}
           />
         )
+      ) : project.error ? (
+        // A Project that is gone (or an id from an old link) used to leave "Loading…" up for
+        // good: NOT_FOUND is not retried, so nothing ever replaced it.
+        <div className="flex items-start gap-2.5 p-6 text-sm" role="alert">
+          <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
+          <div className="space-y-3">
+            <div>
+              <p className="font-medium">Project not available</p>
+              <p className="mt-0.5 text-muted-foreground text-xs">
+                {describeError(project.error, PROJECT_WORDING)}
+              </p>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/projects">
+                <ArrowLeft /> Back to projects
+              </Link>
+            </Button>
+          </div>
+        </div>
       ) : (
         <p className="p-6 text-muted-foreground text-sm">Loading…</p>
       )}
@@ -1137,18 +1213,27 @@ export function ProjectView({ projectId }: { projectId: string }) {
           without a reset path, and the dialog's four lookups stay off a page that is already
           holding eight queries. Cleared on close, or a second right-click would open on the row
           somebody clicked before it. */}
-      {taskPreset && (
-        <CreateTaskDialog
-          trigger={null}
-          open
-          preset={taskPreset}
-          onOpenChange={(next) => !next && setTaskPreset(null)}
-        />
-      )}
+      <Suspense fallback={null}>
+        {taskPreset && (
+          <CreateTaskDialog
+            trigger={null}
+            open
+            preset={taskPreset}
+            onOpenChange={(next) => !next && setTaskPreset(null)}
+          />
+        )}
 
-      {/* The context menu's "Launch N selected issues", mounted here for the same reason
-          `CreateTaskDialog` above is: one overlay per row-triggered action, all in one place. */}
-      <LaunchIssuesDialog rows={launchRows} onOpenChange={(next) => !next && setLaunchRows(null)} />
+        {/* The context menu's "Launch N selected issues", mounted here for the same reason
+            `CreateTaskDialog` above is: one overlay per row-triggered action, all in one place —
+            and, like it, only while open, so its profile and workflow lookups stay off the page
+            until a batch is actually being launched. */}
+        {launchRows && (
+          <LaunchIssuesDialog
+            rows={launchRows}
+            onOpenChange={(next) => !next && setLaunchRows(null)}
+          />
+        )}
+      </Suspense>
 
       {/* Column visibility for *this person*, saved through F19's preference boundary so it
           survives a device change — the same seam the status bar uses. It rides on top of the
@@ -1195,5 +1280,46 @@ export function ProjectView({ projectId }: { projectId: string }) {
         </details>
       </div>
     </div>
+  );
+}
+
+/**
+ * The filter box, holding what is being typed itself.
+ *
+ * In `ProjectView` the typed text was page state, so every keystroke re-rendered the whole page
+ * and the table under it to change one input. Here only this re-renders until the pause commits
+ * the text to the URL — the same split `issues-view.tsx`'s `FilterBar` makes.
+ */
+function ProjectFilterInput({
+  filterText,
+  savedText,
+  go,
+}: {
+  /** What the URL says the filter is — the source of truth. */
+  filterText: string;
+  /** The tab's own saved filter: typing back to it clears `?q=` rather than restating it. */
+  savedText: string;
+  go: (patch: Record<string, string | null>) => void;
+}) {
+  const [typed, setTyped] = useState(filterText);
+  // The URL is the source of truth, so a filter cleared elsewhere — the back button, a tab
+  // switch — has to reach this input too.
+  useEffect(() => setTyped(filterText), [filterText]);
+  useEffect(() => {
+    if (typed === filterText) return;
+    // On a pause, not per keystroke: a router replace per character re-runs the parse mid-word
+    // and fights the cursor. The same 250ms the Issues search box uses.
+    const timer = setTimeout(() => go({ q: typed === savedText ? null : typed }), 250);
+    return () => clearTimeout(timer);
+  }, [typed, filterText, savedText, go]);
+
+  return (
+    <Input
+      value={typed}
+      onChange={(event) => setTyped(event.target.value)}
+      aria-label="Filter items"
+      placeholder={'status:"In progress" assignee:@me -label:blocked'}
+      className="h-7 pl-8 text-xs"
+    />
   );
 }

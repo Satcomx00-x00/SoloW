@@ -1,8 +1,10 @@
 import {
+  Archive,
   Blocks,
   BookOpen,
   Bot,
   Building2,
+  ChartNoAxesColumn,
   CircleDot,
   Columns3,
   Eraser,
@@ -40,7 +42,7 @@ import {
  * Two lists, because there are genuinely two kinds of destination:
  *
  *  - `WORKSPACE_SECTIONS` — the things that exist without a Project: the Project list itself,
- *    the unassigned escape hatch, Workflows, History and Settings.
+ *    the unassigned escape hatch, Workflows, History, Outcomes and Settings.
  *  - `PROJECT_SECTIONS` — everything inside one, resolved against a Project id.
  *
  * **Workflows is in the first list, not the second.** It sat under `/projects/:id/workflows` for
@@ -61,12 +63,6 @@ export interface Section {
   href: string;
   label: string;
   icon: LucideIcon;
-  /**
-   * True for a section whose UI is live but not functionally complete — see
-   * docs/features/F03-workflow-designer.md. Renderers read this to show a WIP marker instead of
-   * letting the section pass for finished work.
-   */
-  wip?: boolean;
 }
 
 /**
@@ -83,8 +79,11 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
   { href: "/unassigned", label: "Unassigned", icon: Inbox },
   // Deliberately not "…in this project": a Workflow names Harness Profiles and Steps, never a
   // Project, so nothing about this entry may imply a scope the data does not have.
-  { href: "/workflows", label: "Workflows", icon: Workflow, wip: true },
+  { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/history", label: "History", icon: History },
+  // Whether the loop works, read from what it recorded (finding A4). After History because both
+  // look back at finished work; Outcomes adds it up.
+  { href: "/outcomes", label: "Outcomes", icon: ChartNoAxesColumn },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -99,7 +98,6 @@ export interface ProjectSection {
   path: string;
   label: string;
   icon: LucideIcon;
-  wip?: boolean;
 }
 
 export const PROJECT_SECTIONS: readonly ProjectSection[] = [
@@ -239,6 +237,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: Building2,
   },
   {
+    id: "history-retention",
+    label: "History retention",
+    caption: "How long a finished Task keeps its transcript",
+    group: "Workspace",
+    icon: Archive,
+  },
+  {
     id: "danger-zone",
     label: "Reset",
     caption: "Empty this Workspace — its work, or everything but the account",
@@ -372,4 +377,28 @@ export function settingsSectionsIn(group: SettingsGroup): SettingsSection[] {
 /** The address of one settings section. */
 export function settingsHref(id: string): string {
   return `/settings?section=${id}`;
+}
+
+/** A page opened from a Settings section without being one — see `settingsPageFor`. */
+export interface SettingsPage {
+  href: string;
+  label: string;
+  /** The id of the section that links to it, which is where the trail places it. */
+  section: string;
+}
+
+const SETTINGS_PAGES: readonly SettingsPage[] = [
+  // Spec F18 FR-6: the guided setup stays reachable after first use, from the Workspace section.
+  { href: "/setup", label: "Guided setup", section: "workspace" },
+];
+
+/**
+ * The Settings page a path is, if it is one.
+ *
+ * Not a workspace destination — the sidebar and the palette would list it as one, and it is a
+ * step inside Settings rather than a place of its own — so `sectionFor` answers nothing for it,
+ * and without this the breadcrumb on `/setup` was empty.
+ */
+export function settingsPageFor(pathname: string): SettingsPage | null {
+  return SETTINGS_PAGES.find((p) => pathname === p.href) ?? null;
 }

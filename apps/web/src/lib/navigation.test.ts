@@ -8,8 +8,10 @@ import {
   projectSectionFor,
   projectSectionHref,
   SECTIONS,
+  SETTINGS_SECTIONS,
   sectionFor,
   settingsHref,
+  settingsPageFor,
   settingsSectionFor,
   settingsSectionsIn,
   taskIdFromPath,
@@ -30,6 +32,7 @@ describe("the destinations", () => {
       "/unassigned",
       "/workflows",
       "/history",
+      "/outcomes",
       "/settings",
     ]);
   });
@@ -40,10 +43,6 @@ describe("the destinations", () => {
 
   it("orders a Project's sections the way the work moves: plan, run, read", () => {
     expect(PROJECT_SECTIONS.map((s) => s.label)).toEqual(["Planning", "Board", "Issues"]);
-  });
-
-  it("marks only Workflows as unfinished", () => {
-    expect(WORKSPACE_SECTIONS.filter((s) => s.wip).map((s) => s.href)).toEqual(["/workflows"]);
   });
 
   it("never uses one icon for two destinations side by side", () => {
@@ -132,5 +131,19 @@ describe("settings sections", () => {
 
   it("addresses a section by query, not by fragment", () => {
     expect(settingsHref("secrets")).toBe("/settings?section=secrets");
+  });
+});
+
+describe("settingsPageFor", () => {
+  it("places the guided setup under an existing Settings section", () => {
+    const page = settingsPageFor("/setup");
+    expect(page?.label).toBe("Guided setup");
+    // A real id, not one `settingsSectionFor` would quietly fall back from.
+    expect(SETTINGS_SECTIONS.map((s) => s.id)).toContain(page?.section ?? "");
+  });
+
+  it("answers nothing for a workspace destination or a path it does not know", () => {
+    expect(settingsPageFor("/settings")).toBeNull();
+    expect(settingsPageFor("/setup/extra")).toBeNull();
   });
 });

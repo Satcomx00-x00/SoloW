@@ -44,3 +44,43 @@ Dev Server (`bunx inngest-cli dev`, started by `scripts/dev.sh`) polls to discov
 application's `emit()` POSTs into real `inngest.send()` calls. Previously neither endpoint
 existed, so events emitted by the application had nowhere to go and no Task or Workflow step
 ever actually ran — this closes that gap without changing `task-run.ts`'s own logic.
+
+## Amendment: self-hosted production mode, signed (2026-10)
+
+The launchers (`scripts/dev.sh`, `scripts/start.sh`, `packages/cli`) no longer run the Inngest
+Dev Server (`inngest dev`, which its own banner calls "not a production deployment"). They run
+`inngest start`, the self-hosted edition of the same binary (inngest-cli 1.45, SDK 4.18), with
+SQLite persistence under `.solow/inngest` and two generated keys:
+
+- `INNGEST_SIGNING_KEY`: the engine signs its calls to `/api/inngest` and the SDK rejects
+  anything unsigned. Verified: an unsigned register or invoke is refused (401).
+- `INNGEST_EVENT_KEY`: `inngest start` accepts events only with this key. Verified: a wrong key
+  gets 401, the right one 200.
+
+The SDK is switched out of dev mode by unsetting `INNGEST_DEV` and pointing `INNGEST_BASE_URL`
+at the local engine. Keys reach the engine through its environment, not argv, so they stay out
+of `ps`. They are generated once into `.solow/` (0600); exported values win.
+
+The web app also authenticates to the orchestrator's `POST /events` with
+`Authorization: Bearer $SOLOW_ORCHESTRATOR_SECRET`. Without a configured secret the route
+refuses everything (503), so a missing launcher setting cannot silently open it.
+
+Limits that remain: `inngest start --host` moves the API listener only. The connect gateway
+(:8289) and the gRPC ports (:50052, :50053) bind all interfaces and have no bind flag in 1.45;
+they are not used by SoloW (it serves functions over HTTP), but should be firewalled when the
+machine is reachable from a network. `inngest start` keeps its queue in an in-process Redis
+with periodic snapshots, so a crash can lose the last few seconds of queue state; acceptable
+for a single user, and an external `--redis-uri` / `--postgres-uri` is the upgrade path.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds, as amended.** Two changes since acceptance, both recorded:
+[0030](./0030-review-gate-is-a-database-state.md) took human Gates out of the engine (a gate is a
+database state, and a decision starts the next run), and the amendment above moved the launchers
+from the Dev Server to the signed, self-hosted `inngest start`. Runs, retries and the five-hour
+quota park (`step.sleepUntil` in `task-run/terminal.ts`) still rely on the engine. Risk R-4 is
+real and handled outside it: sweeps in `apps/orchestrator/src/reconcile.ts` find runs the engine
+lost (orphaned, stranded at review, parked and never woken).

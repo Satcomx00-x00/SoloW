@@ -4,7 +4,12 @@ import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
-import { projectSectionHref, settingsSectionFor } from "@/lib/navigation";
+import {
+  projectSectionHref,
+  settingsHref,
+  settingsPageFor,
+  settingsSectionFor,
+} from "@/lib/navigation";
 import { trpc } from "@/trpc/react";
 import { CommandPaletteTrigger } from "./command-palette";
 import { HeaderActionsOutlet } from "./header-actions";
@@ -50,6 +55,12 @@ function Separator() {
 }
 
 interface Segment {
+  /**
+   * Which level of the trail this is. Not the href: a Project's overview *is* its Planning
+   * section, so on that page two crumbs link to one address, and keying by it gave React two
+   * children with one key — logged as an error, which the dev overlay counts as an issue.
+   */
+  key: string;
   label: string;
   href?: string | undefined;
 }
@@ -61,8 +72,8 @@ function useLeaf(place: Place): Segment | null {
     { id: place.issueId ?? "" },
     { enabled: !!place.issueId && !place.taskId },
   );
-  if (place.taskId) return { label: task.data?.title ?? "Task" };
-  if (place.issueId) return { label: issue.data?.title ?? "Issue" };
+  if (place.taskId) return { key: "leaf", label: task.data?.title ?? "Task" };
+  if (place.issueId) return { key: "leaf", label: issue.data?.title ?? "Issue" };
   return null;
 }
 
@@ -79,21 +90,33 @@ function Trail() {
     { enabled: place.projectId !== null },
   );
 
+  const settingsPage = settingsPageFor(place.pathname);
+
   const segments: Segment[] = [];
   if (place.projectId) {
-    segments.push({ label: "Projects", href: "/projects" });
+    segments.push({ key: "projects", label: "Projects", href: "/projects" });
     segments.push({
+      key: "project",
       label: project.data?.title ?? "Project",
       href: projectSectionHref(place.projectId, ""),
     });
     if (place.projectSection) {
       segments.push({
+        key: "section",
         label: place.projectSection.label,
         href: projectSectionHref(place.projectId, place.projectSection.path),
       });
     }
   } else if (place.section) {
-    segments.push({ label: place.section.label, href: place.section.href });
+    segments.push({ key: "section", label: place.section.label, href: place.section.href });
+  } else if (settingsPage) {
+    segments.push({ key: "settings", label: "Settings", href: "/settings" });
+    segments.push({
+      key: "section",
+      label: settingsSectionFor(settingsPage.section).label,
+      href: settingsHref(settingsPage.section),
+    });
+    segments.push({ key: "leaf", label: settingsPage.label });
   }
   if (leaf) segments.push(leaf);
 
@@ -104,7 +127,7 @@ function Trail() {
   return (
     <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
       {segments.map((segment, i) => (
-        <span key={segment.href ?? segment.label} className="flex min-w-0 items-center gap-1">
+        <span key={segment.key} className="flex min-w-0 items-center gap-1">
           {i > 0 && <Separator />}
           <Crumb href={i === last && !inSettings ? undefined : segment.href}>{segment.label}</Crumb>
         </span>

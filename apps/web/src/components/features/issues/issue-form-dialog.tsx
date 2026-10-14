@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
@@ -98,6 +99,8 @@ export function IssueFormDialog({
   const create = trpc.issue.create.useMutation({
     onSuccess: () => {
       utils.issue.list.invalidate();
+      // A local Project gains the new Issue as a row, so its table has to refetch too.
+      utils.project.allItems.invalidate();
       // The label vocabulary the list's filter offers is read from the Issues themselves, so a
       // label first used here does not exist for that menu until this refetches (caught in the
       // browser: a new label showed on the row but never in the filter).
@@ -296,7 +299,7 @@ export function IssueFormDialog({
           </div>
           {mutation.error && (
             <p className="text-destructive text-sm" role="alert">
-              {mutation.error.message}
+              {describeError(mutation.error)}
             </p>
           )}
         </div>

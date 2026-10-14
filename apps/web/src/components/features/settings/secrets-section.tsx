@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
 import {
   SectionStatus,
@@ -171,7 +172,7 @@ export function SecretsSection() {
 
         {deleteSecret.error && (
           <p className="text-destructive text-sm" role="alert">
-            {deleteSecret.error.message}
+            {describeError(deleteSecret.error)}
           </p>
         )}
 
@@ -223,7 +224,7 @@ export function SecretsSection() {
           </form>
           {setSecret.error && (
             <p className="text-destructive text-sm" role="alert">
-              {setSecret.error.message}
+              {describeError(setSecret.error)}
             </p>
           )}
           {justResumed !== null && (

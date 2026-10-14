@@ -10,6 +10,7 @@ import {
   type SkillImportSource,
 } from "@solow/contracts";
 import { describeSkill, parseSkillLocator, type SkillLocator, skillSlug } from "@solow/core";
+import { mapConcurrently } from "@solow/scm";
 import { gunzipSync, unzipSync } from "fflate";
 
 /**
@@ -467,46 +468,104 @@ async function resolveWellKnown(
   const dir = join(skillsRoot, segmentSlug(index.base.replace(/^https?:\/\//, "")) || "well-known");
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
-  for (const entry of entries) {
+
+  /*
+   * Fetched four entries at a time, not one after another. A site can list `MAX_SKILLS` of them,
+   * each a `SKILL.md` and its files, and the whole import is one request a person is waiting on —
+   * a few hundred sequential round trips to a third-party host.
+   *
+   * Two things keep the outcome the sequential loop's:
+   *
+   *  - **Entries that land on the same directory stay in order.** Two names can slug alike, and
+   *    the later one overwrote the earlier; each such group runs as one unit, in index order.
+   *  - **The first failure, in index order, is the answer.** Later entries may be written by
+   *    then — an import that failed is reported as failed either way.
+   *
+   * Archives are the exception, and stay sequential after the rest: one can be
+   * `MAX_ARCHIVE_BYTES`, and four in flight at once is four of those held in memory.
+   */
+  type Placed = { position: number; entry: WellKnownEntry };
+  const groups = new Map<string, Placed[]>();
+  entries.forEach((entry, position) => {
     const name = skillSlug(entry.name);
-    if (!name) continue;
-    const target = join(dir, name);
-    if ("files" in entry) {
-      const base = `${index.base}/${index.wellKnownPath}/${encodeURIComponent(entry.name)}`;
-      const markdown = await fetchBytes([`${base}/SKILL.md`], fetchImpl, MAX_SKILL_MD_BYTES);
-      if (!markdown) continue;
-      const writes: { path: string; data: Uint8Array }[] = [{ path: "SKILL.md", data: markdown }];
-      for (const file of entry.files.slice(0, MAX_ARCHIVE_ENTRIES)) {
-        const rel = safeRelativePath(file);
-        if (!rel || rel.toLowerCase() === "skill.md") continue;
-        const data = await fetchBytes(
-          [`${base}/${file.split("/").map(encodeURIComponent).join("/")}`],
-          fetchImpl,
-        );
-        if (data) writes.push({ path: rel, data });
+    if (!name) return;
+    const group = groups.get(name) ?? [];
+    group.push({ position, entry });
+    groups.set(name, group);
+  });
+  const failures: { position: number; error: ImportError }[] = [];
+  const runGroup = async ([name, group]: [string, Placed[]]): Promise<void> => {
+    for (const { position, entry } of group) {
+      const failed = await importWellKnownEntry(index, entry, join(dir, name), fetchImpl);
+      if (failed) {
+        failures.push({ position, error: failed });
+        return;
       }
-      await writeTree(target, writes);
-      continue;
     }
-    let artifactUrl: string;
-    try {
-      artifactUrl = new URL(entry.url, index.indexUrl).toString();
-    } catch {
-      continue;
-    }
-    const bytes = await fetchBytes([artifactUrl], fetchImpl);
-    if (!bytes) continue;
-    if (!(await digestMatches(bytes, entry.digest))) {
-      return err(HarnessLibraryErrorCode.ImportArchiveInvalid);
-    }
-    if (entry.type === "archive") {
-      const unpacked = await unpackArchiveInto(target, bytes);
-      if (!unpacked.ok) return unpacked;
-    } else {
-      await writeTree(target, [{ path: "SKILL.md", data: bytes }]);
-    }
-  }
+  };
+  const holdsArchive = ([, group]: [string, Placed[]]) =>
+    group.some(({ entry }) => !("files" in entry) && entry.type === "archive");
+  const all = [...groups];
+  await mapConcurrently(
+    all.filter((group) => !holdsArchive(group)),
+    WELL_KNOWN_CONCURRENCY,
+    runGroup,
+  );
+  for (const group of all.filter(holdsArchive)) await runGroup(group);
+
+  const first = failures.sort((a, b) => a.position - b.position)[0];
+  if (first) return err(first.error);
   return ok({ root: dir, skills: locator.skills });
+}
+
+/** How many well-known entries are fetched at once — see `resolveWellKnown`. */
+const WELL_KNOWN_CONCURRENCY = 4;
+
+/**
+ * One index entry fetched into `target`: null when it was written or skipped (an entry that
+ * cannot be fetched is left out, as it always was), the error when it ends the import.
+ */
+async function importWellKnownEntry(
+  index: WellKnownIndex,
+  entry: WellKnownEntry,
+  target: string,
+  fetchImpl: typeof fetch,
+): Promise<ImportError | null> {
+  if ("files" in entry) {
+    const base = `${index.base}/${index.wellKnownPath}/${encodeURIComponent(entry.name)}`;
+    const markdown = await fetchBytes([`${base}/SKILL.md`], fetchImpl, MAX_SKILL_MD_BYTES);
+    if (!markdown) return null;
+    const writes: { path: string; data: Uint8Array }[] = [{ path: "SKILL.md", data: markdown }];
+    for (const file of entry.files.slice(0, MAX_ARCHIVE_ENTRIES)) {
+      const rel = safeRelativePath(file);
+      if (!rel || rel.toLowerCase() === "skill.md") continue;
+      const data = await fetchBytes(
+        [`${base}/${file.split("/").map(encodeURIComponent).join("/")}`],
+        fetchImpl,
+      );
+      if (data) writes.push({ path: rel, data });
+    }
+    await writeTree(target, writes);
+    return null;
+  }
+  let artifactUrl: string;
+  try {
+    artifactUrl = new URL(entry.url, index.indexUrl).toString();
+  } catch {
+    return null;
+  }
+  const bytes = await fetchBytes([artifactUrl], fetchImpl);
+  if (!bytes) return null;
+  if (!(await digestMatches(bytes, entry.digest))) {
+    return HarnessLibraryErrorCode.ImportArchiveInvalid;
+  }
+  if (entry.type === "archive") {
+    const unpacked = await unpackArchiveInto(target, bytes);
+    if (!unpacked.ok) return unpacked.error;
+  } else {
+    await writeTree(target, [{ path: "SKILL.md", data: bytes }]);
+  }
+  return null;
 }
 
 /** A path from an index or an archive, relative and inside its directory, or null. */

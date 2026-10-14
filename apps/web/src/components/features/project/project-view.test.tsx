@@ -208,6 +208,24 @@ describe("ProjectView — resolving @me", () => {
   });
 });
 
+describe("ProjectView — a project that is not there", () => {
+  it("says so with the way back, instead of 'Loading…' for good", async () => {
+    renderWithTrpc(<ProjectView projectId="prj-gone" />, {
+      ...handlers(null),
+      "project.get": () => {
+        throw new Error("NOT_FOUND");
+      },
+    });
+
+    expect(await screen.findByText(/This project no longer exists/)).toBeDefined();
+    expect(screen.queryByText("NOT_FOUND")).toBeNull();
+    expect(screen.queryByText("Loading…")).toBeNull();
+    expect(screen.getByRole("link", { name: "Back to projects" }).getAttribute("href")).toBe(
+      "/projects",
+    );
+  });
+});
+
 /**
  * Narrowing by label, from a menu.
  *

@@ -1,17 +1,19 @@
 "use client";
 
-import type { TaskDependencyDto } from "@solow/contracts";
+import { CommonErrorCode, type TaskDependencyDto } from "@solow/contracts";
 import { ArrowLeft, ExternalLink, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CreateTaskDialog, type TaskPreset } from "@/components/features/board/create-task-dialog";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
+import { preloadHarnessMarkdown } from "@/components/features/task/lazy-markdown";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { describeError } from "@/lib/errors";
 import { issueSourceLabel } from "@/lib/issue-status";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
@@ -20,6 +22,12 @@ import { DeleteIssueAction } from "./delete-issue-action";
 import { IssueBody } from "./issue-body";
 import { IssueFormDialog } from "./issue-form-dialog";
 import { IssueStatusControl } from "./issue-status-control";
+
+/** On this page the thing that went missing is the Issue, so the shared sentence can say so. */
+const ISSUE_WORDING = {
+  [CommonErrorCode.NotFound]:
+    "This issue no longer exists — it may have been deleted, or the link is out of date.",
+};
 
 /**
  * One Issue and the Tasks cut from it.
@@ -33,6 +41,9 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const issue = trpc.issue.get.useQuery({ id: issueId });
+  // The description is drawn as markdown the moment the read lands; fetch the renderer alongside
+  // it, not after it.
+  useEffect(() => preloadHarnessMarkdown(), []);
   // Back goes to the Project this Issue belongs to — the route is flat, so the destination has
   // to be asked for rather than read off the address.
   const back = useBackToProject(issueId, "/issues");
@@ -89,11 +100,20 @@ export function IssueDetail({ issueId }: { issueId: string }) {
         role="alert"
       >
         <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
-        <div>
-          <p className="font-medium">Issue not available</p>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-            {issue.error?.message ?? "Issue not found"}
-          </p>
+        {/* The way back is the one action every failure here has to offer — a sentence with no
+            exit strands the Owner on a dead URL. */}
+        <div className="space-y-3">
+          <div>
+            <p className="font-medium">Issue not available</p>
+            <p className="mt-0.5 text-muted-foreground text-xs">
+              {describeError(issue.error ?? CommonErrorCode.NotFound, ISSUE_WORDING)}
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href={back.href}>
+              <ArrowLeft /> {back.label}
+            </Link>
+          </Button>
         </div>
       </div>
     );
@@ -225,8 +245,8 @@ export function IssueDetail({ issueId }: { issueId: string }) {
             <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
             <span>
               Tasks not available
-              <span className="mt-0.5 block font-mono text-muted-foreground text-xs">
-                {tasksError.message}
+              <span className="mt-0.5 block text-muted-foreground text-xs">
+                {describeError(tasksError)}
               </span>
             </span>
           </p>

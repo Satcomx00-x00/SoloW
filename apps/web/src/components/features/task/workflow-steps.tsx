@@ -2,7 +2,7 @@
 
 import type { TaskDto, TaskState, TaskWorkflowBindingDto, WorkflowStepDto } from "@solow/contracts";
 import { Workflow } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { StepStatus } from "@/components/ui/steps";
 import { trpc } from "@/trpc/react";
 
@@ -95,6 +95,8 @@ export interface StepScope {
   settled: boolean;
 }
 
+const NO_STEPS: SteppedStep[] = [];
+
 /**
  * Which Step the terminal is showing.
  *
@@ -121,7 +123,12 @@ export function useStepScope(task: TaskDto | null): StepScope {
   const [override, setOverride] = useState<string | null | undefined>(undefined);
   const select = useCallback((stepId: string | null) => setOverride(stepId), []);
 
-  const stepped = binding && task ? stepStatuses(binding, task.state) : [];
+  // Memoized: the Task page builds its board from this, and a fresh array per render rebuilt it.
+  const taskState = task?.state;
+  const stepped = useMemo(
+    () => (binding && taskState ? stepStatuses(binding, taskState) : NO_STEPS),
+    [binding, taskState],
+  );
   const following = binding?.currentStep.id ?? null;
   const known =
     override === undefined || override === null || stepped.some((s) => s.step.id === override);
@@ -138,8 +145,8 @@ export function useStepScope(task: TaskDto | null): StepScope {
  * the tabs scoped the board and the transcript. The board itself now draws every Step as a node,
  * with the one running and the one waiting on you animated, so a second row of the same Steps in
  * the header was a duplicate competing for the eye; it was removed on request. Scoping is still
- * there: the board follows the Step the run is on, and a Step's own dialog has "Show this step
- * on the board".
+ * there: the board follows the Step the run is on, and a Step's own dialog has "Show in Steps"
+ * (the board's name in the interface).
  */
 export function WorkflowPosition({ scope }: { scope: StepScope }) {
   const { binding, stepped } = scope;

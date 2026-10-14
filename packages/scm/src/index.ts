@@ -20,7 +20,7 @@ export { GiteaProvider } from "./gitea.js";
 export { GithubProvider } from "./github.js";
 export { GitlabProvider } from "./gitlab.js";
 // The paging bound a caller needs to tell a complete listing from a truncated one (issue #125).
-export { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE } from "./http.js";
+export { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE, mapConcurrently } from "./http.js";
 export { DEFAULT_LABEL_TAXONOMY } from "./label-taxonomy.js";
 export * from "./types.js";
 
@@ -316,6 +316,23 @@ export function providerWith<C extends IntegrationCapability>(
   // `ProviderRegistry.register` refuses any descriptor whose driver lacks a method its manifest
   // promised, so a descriptor that comes back from `with` provably has them.
   return found ? (found.driver as DriverWith<C>) : null;
+}
+
+/**
+ * What approval opens on this Repository's provider — "pull request", "merge request" — or null
+ * when approval cannot ship from it at all (A1): a local folder, a URL imported without an
+ * Integration, or a provider that has no change requests. The orchestrator asks it before it
+ * pushes and the web app before it describes the result, so the two cannot disagree about which
+ * repositories ship.
+ */
+export function changeRequestNounFor(repository: {
+  source: string;
+  externalFullName: string | null;
+  provider: string | null;
+}): string | null {
+  if (repository.source !== "remote_url" || !repository.externalFullName) return null;
+  if (!repository.provider || !providerWith(repository.provider, "changeRequests")) return null;
+  return providerManifest(repository.provider)?.changeRequestNoun ?? "pull request";
 }
 
 /** Whether this build can act through a stored provider id at all. */

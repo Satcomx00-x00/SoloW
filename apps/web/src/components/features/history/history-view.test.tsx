@@ -130,6 +130,57 @@ describe("HistoryView", () => {
     expect(log.calls.find((c) => c.path === "task.launch")?.input).toEqual({ id: "task-done" });
   });
 
+  it("invites the Owner of an upgraded Workspace to choose a retention window, once", async () => {
+    let notice = true;
+    const { log } = renderWithTrpc(<HistoryView />, {
+      "history.list": () => [],
+      "workspace.historyRetention": () => ({
+        days: null,
+        notice,
+        defaultDays: 30,
+        options: [7, 30, 90, 365],
+      }),
+      "workspace.setHistoryRetention": (input: unknown) => {
+        notice = false;
+        return {
+          days: (input as { days: number | null }).days,
+          notice,
+          defaultDays: 30,
+          options: [7, 30, 90, 365],
+        };
+      },
+    });
+
+    const hint = await screen.findByRole("status", { name: "Choose how long to keep history" });
+    expect(within(hint).getByRole("link", { name: "Choose a window" }).getAttribute("href")).toBe(
+      "/settings?section=history-retention",
+    );
+
+    fireEvent.click(within(hint).getByRole("button", { name: "Keep forever" }));
+    await waitFor(() =>
+      expect(log.calls.find((c) => c.path === "workspace.setHistoryRetention")?.input).toEqual({
+        days: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Choose how long to keep history" })).toBeNull(),
+    );
+  });
+
+  it("says nothing about retention to a Workspace that has chosen", async () => {
+    renderWithTrpc(<HistoryView />, {
+      "history.list": () => [],
+      "workspace.historyRetention": () => ({
+        days: 30,
+        notice: false,
+        defaultDays: 30,
+        options: [7, 30, 90, 365],
+      }),
+    });
+    await screen.findByText("Nothing in history");
+    expect(screen.queryByRole("status", { name: "Choose how long to keep history" })).toBeNull();
+  });
+
   it("says so when there is nothing to show", async () => {
     renderWithTrpc(<HistoryView />, { "history.list": () => [] });
     expect(await screen.findByText("Nothing in history")).toBeDefined();

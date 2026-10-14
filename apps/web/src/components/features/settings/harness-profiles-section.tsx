@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -341,8 +342,8 @@ export function HarnessProfilesSection() {
           /*
             The reading this whole section exists to give, and which it never gave before: a
             concurrency cap is only meaningful against the slots currently spending it. Parked
-            outranks running in the tone, because Parked is the state a cap *causes* — it means
-            work is waiting on a ceiling set right here.
+            outranks running in the tone, because a parked run is work standing still: it hit a
+            usage limit and waits out a fixed five hours before it claims a slot again.
           */
           <SectionStatus tone={parked > 0 ? "waiting" : running > 0 ? "active" : "idle"}>
             {rows.length === 0
@@ -514,7 +515,7 @@ export function HarnessProfilesSection() {
       )}
       {deleteProfile.error && (
         <p className="text-destructive text-sm" role="alert">
-          {deleteProfile.error.message}
+          {describeError(deleteProfile.error)}
         </p>
       )}
 
@@ -786,7 +787,7 @@ export function HarnessProfilesSection() {
         </form>
         {create.error && (
           <p className="text-destructive text-sm" role="alert">
-            {create.error.message}
+            {describeError(create.error)}
           </p>
         )}
 
@@ -946,7 +947,7 @@ export function HarnessProfilesSection() {
             </form>
             {createCatalogEntry.error && (
               <p className="text-destructive text-sm" role="alert">
-                {createCatalogEntry.error.message}
+                {describeError(createCatalogEntry.error)}
               </p>
             )}
           </div>

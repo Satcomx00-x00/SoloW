@@ -213,6 +213,7 @@ describe("loadTaskRunContext — clone credential for an imported Repository", (
     expect(ctx.repositories[0]?.scmClone).toEqual({
       provider: "github",
       secretCiphertext: scmCiphertext,
+      baseUrl: null,
     });
     // Encrypted here, decrypted only at the point the clone runs (Principle IV).
     expect(JSON.stringify(ctx.repositories)).not.toContain("ghp-clone-me");
@@ -319,6 +320,7 @@ describe("loadTaskRunContext — several attached Repositories", () => {
     expect(ctx.repositories[0]?.scmClone).toEqual({
       provider: "github",
       secretCiphertext: ciphertext,
+      baseUrl: null,
     });
     expect(ctx.repositories[1]?.scmClone).toBeNull();
   });

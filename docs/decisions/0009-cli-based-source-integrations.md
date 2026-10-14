@@ -55,3 +55,13 @@ is handled ([Decision 0005](./0005-subscription-authentication.md)).
   per host.
 - Realises [F12](../features/F12-integrations.md) for GitHub and GitLab; other trackers
   (Jira, Linear, Sentry) are integrated by their own appropriate means.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: superseded, as recorded.** No source integration shells out to `gh` or `glab`;
+`packages/scm` talks to the GitHub, GitLab and Gitea APIs directly
+([0014](./0014-direct-api-source-integrations.md)). The record's reasoning still applies to
+harnesses, which are driven as CLIs.

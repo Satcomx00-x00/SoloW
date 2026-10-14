@@ -3,14 +3,36 @@
 import type { WorkflowDto } from "@solow/contracts";
 import { Plus, Store, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { describeError } from "@/lib/errors";
 import { trpc } from "@/trpc/react";
-import { WorkflowStoreDialog } from "./workflow-store-dialog";
 import { ImportWorkflowDialog } from "./workflow-transfer";
+
+/**
+ * The store's catalog is not part of the page.
+ *
+ * The dialog reads `WORKFLOW_STORE` and the vendored Skills it installs, ~270 KB of text — ~100 KB
+ * gzipped, more than the canvas itself — and a static import made every visit to Workflows wait
+ * for it before the page could run, to draw a button. Loaded once the header renders instead; the
+ * button shows straight away, disabled until the dialog behind it has arrived, so a quick click
+ * waits rather than landing on nothing.
+ */
+const WorkflowStoreDialog = lazy(() =>
+  import("./workflow-store-dialog").then((module) => ({ default: module.WorkflowStoreDialog })),
+);
+
+function StoreButton({ disabled = false }: { disabled?: boolean }) {
+  return (
+    <Button disabled={disabled} size="sm" type="button" variant="ghost">
+      <Store aria-hidden />
+      Store
+    </Button>
+  );
+}
 
 /**
  * The three ways a pipeline comes into being — from scratch, from a file, from the store — as the
@@ -23,15 +45,9 @@ import { ImportWorkflowDialog } from "./workflow-transfer";
 export function WorkflowCreateActions({ installed }: { installed: readonly WorkflowDto[] }) {
   return (
     <>
-      <WorkflowStoreDialog
-        installed={installed}
-        trigger={
-          <Button size="sm" type="button" variant="ghost">
-            <Store aria-hidden />
-            Store
-          </Button>
-        }
-      />
+      <Suspense fallback={<StoreButton disabled />}>
+        <WorkflowStoreDialog installed={installed} trigger={<StoreButton />} />
+      </Suspense>
       <ImportWorkflowDialog
         trigger={
           <Button size="sm" type="button" variant="ghost">
@@ -52,8 +68,15 @@ function NewWorkflowButton() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const create = trpc.workflow.create.useMutation({
-    onSuccess: (created) => {
-      utils.workflow.list.invalidate();
+    onSuccess: async (created) => {
+      // Cancelled before invalidating: a Create pressed while the page's first read of the list is
+      // still out would otherwise have the invalidation join that read, which began before the
+      // write. The canvas picks its Workflow out of that list, so it would open on "No workflows
+      // yet" — or on another pipeline — and the 30 s staleTime keeps it there (the same React
+      // Query behaviour `SplitTaskButton` notes). A cancelled read goes back to unloaded, and the
+      // invalidation reads anew.
+      await utils.workflow.list.cancel();
+      void utils.workflow.list.invalidate();
       setName("");
       setOpen(false);
       router.push(`/workflows/${created.id}`);
@@ -90,8 +113,8 @@ function NewWorkflowButton() {
             Create
           </Button>
           {create.error && (
-            <p className="font-mono text-2xs text-state-failed" role="alert">
-              {create.error.message}
+            <p className="text-2xs text-state-failed" role="alert">
+              {describeError(create.error)}
             </p>
           )}
         </form>

@@ -88,3 +88,13 @@ provider and the value is re-read from the answer.
   provider's own UI is where one is created.
 - **Writing back anything but field values** — titles, descriptions and comments stay the
   provider's, exactly as [F01](../features/F01-issue-management.md) already requires.
+
+## Review (2026-10-09)
+
+The one-month review ([Conventions](../CONVENTIONS.md#maintenance)), held late, against the code
+at version 0.21.0.
+
+**Verdict: holds.** GitHub and GitLab declare a `projects` capability in `packages/scm`; GitHub
+mirrors Projects fields, GitLab synthesises them from scoped labels, and each declares what it
+cannot hold. Gitea declares no `projects` capability, which is the outcome the declaration was
+designed to make honest.

@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { describeError } from "@/lib/errors";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
@@ -209,8 +210,11 @@ function StoreCard({
   const gates = entry.steps.filter((s) => s.gate === "human").length;
 
   const install = trpc.workflow.installFromStore.useMutation({
-    onSuccess: (result) => {
-      utils.workflow.list.invalidate();
+    onSuccess: async (result) => {
+      // Cancelled first, so a list read still in flight cannot answer for the new pipeline
+      // (see `NewWorkflowButton`).
+      await utils.workflow.list.cancel();
+      void utils.workflow.list.invalidate();
       // The Steps name Skills the install may just have written; the library and every
       // Step's picker read that list.
       if (result.createdSkills.length > 0) utils.library.skill.list.invalidate();
@@ -251,7 +255,7 @@ function StoreCard({
       </ol>
       <p className="text-2xs text-muted-foreground">
         {entry.steps.length === 1 ? "1 step" : `${entry.steps.length} steps`}
-        {gates > 0 && ` · ${gates === 1 ? "1 human gate" : `${gates} human gates`}`}
+        {gates > 0 && ` · ${gates === 1 ? "1 waits for review" : `${gates} wait for review`}`}
         {skills.length > 0 && (
           <>
             {" · brings "}
@@ -262,7 +266,7 @@ function StoreCard({
 
       {install.error && (
         <p className="text-feedback-error text-xs" role="alert">
-          {install.error.message}
+          {describeError(install.error)}
         </p>
       )}
 

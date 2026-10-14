@@ -1264,15 +1264,16 @@ describe("reportStrandedParks", () => {
     /*
      * The one assertion in this file that is not about a row.
      *
-     * `PARK_WINDOW_MS` is a second copy of `PARK_SLEEP_MS`, kept here because a sweep that runs
-     * every sixty seconds must not import the durable workflow module and everything it drags in
-     * — and a comment saying "change one, change both" is not a mechanism. The drift that matters
-     * has a direction: grow the sleep without growing this and every run still legitimately asleep
-     * starts being reported, and its container reaped, hours before its own wake-up time.
+     * `PARK_SLEEP_MS` is defined as `PARK_WINDOW_MS`, which lives in `@solow/core` because a sweep
+     * that runs every sixty seconds must not import the durable workflow module. This keeps it
+     * that way: a literal put back in the run engine would be a second copy, and the drift that
+     * matters has a direction — grow the sleep without growing this and every run still
+     * legitimately asleep starts being reported, and its container reaped, hours before its own
+     * wake-up time.
      *
      * Deliberately an equality rather than a `>=`. This module is allowed to wait *longer* than a
-     * park (it already adds `RECLAIM_STALE_MS` at the call site), but a copy that is merely
-     * "enough" today drifts silently; a copy that must be exact cannot.
+     * park (it already adds `RECLAIM_STALE_MS` at the call site), but a window that is merely
+     * "enough" today drifts silently; one that must be exact cannot.
      */
     expect(PARK_WINDOW_MS).toBe(PARK_SLEEP_MS);
   });

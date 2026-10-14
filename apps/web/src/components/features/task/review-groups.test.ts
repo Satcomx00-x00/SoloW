@@ -160,10 +160,8 @@ describe("summariseConsequences", () => {
     expect(summariseConsequences(groups)).toContain("1 with no changes");
   });
 
-  it("says so plainly when there is nothing to integrate", () => {
-    expect(summariseConsequences([])).toBe(
-      "Nothing to integrate — the harness proposed no changes.",
-    );
+  it("says so plainly when there is nothing to commit", () => {
+    expect(summariseConsequences([])).toBe("Nothing to commit — the harness proposed no changes.");
   });
 
   it("promises no pull request, because this build opens none", () => {
