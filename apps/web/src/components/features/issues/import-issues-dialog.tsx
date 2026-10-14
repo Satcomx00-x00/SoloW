@@ -2,7 +2,7 @@
 
 import type { ExternalIssuePreviewDto } from "@solow/contracts";
 import { Check, Download, Search } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -123,15 +123,21 @@ export function ImportIssuesDialog({
 
   const all = useMemo(() => external.data ?? [], [external.data]);
 
+  /*
+   * The list filters on a deferred copy of the search, so the box takes each keystroke at once
+   * and the redraw of every row — the provider's whole issue list, a checkbox each — follows when
+   * there is time for it.
+   */
+  const deferredSearch = useDeferredValue(search);
   /** What the filters leave on screen — the list, the counts and select-all all read this. */
   const visible = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+    const needle = deferredSearch.trim().toLowerCase();
     return all.filter((i: ExternalIssuePreviewDto) => {
       if (stateFilter !== "all" && i.state !== stateFilter) return false;
       if (!needle) return true;
       return i.title.toLowerCase().includes(needle) || String(i.number).includes(needle);
     });
-  }, [all, search, stateFilter]);
+  }, [all, deferredSearch, stateFilter]);
 
   // Only what is both visible and not already in SoloW can be acted on, so that is what
   // "select all" toggles against — offering to select rows whose checkbox is disabled would
@@ -267,7 +273,11 @@ export function ImportIssuesDialog({
                   {visible.map((i) => {
                     const checked = selected.has(i.externalId);
                     return (
-                      <li key={i.externalId}>
+                      // Off-screen rows skip layout and paint; every row is the label's fixed h-11.
+                      <li
+                        key={i.externalId}
+                        className="[contain-intrinsic-size:auto_44px] [content-visibility:auto]"
+                      >
                         {/* The whole row is the hit target, not just the 16px checkbox —
                               picking twenty issues out of a list is the actual task here.
                               Radix renders the checkbox as a <button>, which a browser will not
