@@ -282,15 +282,20 @@ export async function resetWorkspaceData(
 
   const result = ctx.db.transaction((tx) => resetWorkspace(tx, ctx.workspaceId, input.scope));
 
-  for (const entry of result.purge) {
-    // Best effort, never fatal, exactly as `deleteIssue`'s purge is: the rows are gone, and an
-    // orchestrator that is not running is not a reason to report the reset as having failed.
-    await orchestrator.purgeTaskFiles({
-      workspaceId: ctx.workspaceId,
-      taskId: entry.taskId,
-      worktrees: entry.worktrees,
-    });
-  }
+  // Best effort, never fatal, exactly as `deleteIssue`'s purge is: the rows are gone, and an
+  // orchestrator that is not running is not a reason to report the reset as having failed.
+  // `allSettled` is what makes that true — `purgeTaskFiles` throws on a refused or unreachable
+  // orchestrator, and an awaited loop reported the committed reset as an error. It also sends the
+  // requests together rather than one round trip per Task.
+  await Promise.allSettled(
+    result.purge.map((entry) =>
+      orchestrator.purgeTaskFiles({
+        workspaceId: ctx.workspaceId,
+        taskId: entry.taskId,
+        worktrees: entry.worktrees,
+      }),
+    ),
+  );
 
   return ok({
     scope: input.scope,
